@@ -60,12 +60,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
     });
   }
 
+  // 🛠️ [수정] 모임방 식별 번호로도 쪽지방을 검색할 수 있도록 필터링 조건을 확장했습니다.
   List<Conversation> get _filteredConversations {
     final keyword = _searchKeyword.trim().toLowerCase();
     if (keyword.isEmpty) return _conversations;
     return _conversations.where((c) {
-      return c.peerNickname.toLowerCase().contains(keyword) ||
-          (c.lastMessage ?? '').toLowerCase().contains(keyword);
+      final peerMatch = c.peerNickname.toLowerCase().contains(keyword);
+      final msgMatch = (c.lastMessage ?? '').toLowerCase().contains(keyword);
+      final groupMatch =
+          '모임 ${c.groupId}'.contains(keyword) ||
+          c.groupId.toString() == keyword;
+
+      return peerMatch || msgMatch || groupMatch;
     }).toList();
   }
 
@@ -99,13 +105,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   Future<void> _openChat(Conversation conv) async {
     // 읽음 처리
-    await LocalChatDb.instance.markRead(conv.peerId);
+    await LocalChatDb.instance.markRead(conv.groupId, conv.peerId);
 
     if (!mounted) return;
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => PersonalChatScreen(
+          groupId: conv.groupId,
           userName: conv.peerNickname.isEmpty
               ? '사용자 ${conv.peerId}'
               : conv.peerNickname,
@@ -141,9 +148,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   Widget _buildConversationTile(Conversation conv) {
     final hasUnread = conv.unreadCount > 0;
-    final displayName = conv.peerNickname.isEmpty
+    final baseName = conv.peerNickname.isEmpty
         ? '사용자 ${conv.peerId}'
         : conv.peerNickname;
+
+    // 🛠️ [핵심 수정]: 단순히 유저 이름만 보여주던 방식에서 앞에 [모임 X] 머리말을 강제로 결합합니다.
+    final displayName = '[모임 ${conv.groupId}] $baseName';
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -151,7 +161,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         radius: 24,
         backgroundColor: hasUnread ? Colors.green[100] : Colors.grey[200],
         child: Text(
-          displayName.isNotEmpty ? displayName.substring(0, 1) : '?',
+          baseName.isNotEmpty ? baseName.substring(0, 1) : '?',
           style: TextStyle(
             color: hasUnread ? Colors.green[800] : Colors.grey[700],
             fontWeight: FontWeight.bold,
@@ -209,7 +219,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           });
         },
         decoration: InputDecoration(
-          hintText: '대화 검색',
+          hintText: '대화 상대 또는 모임 번호 검색',
           prefixIcon: const Icon(Icons.search),
           suffixIcon: _searchKeyword.isNotEmpty
               ? IconButton(
@@ -246,7 +256,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       child: Scaffold(
         backgroundColor: Colors.grey[100],
         appBar: AppBar(
-          title: const Text('채팅'),
+          title: const Text('쪽지함'),
           backgroundColor: Colors.green[100],
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),

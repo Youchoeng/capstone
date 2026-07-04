@@ -39,19 +39,19 @@ class DefaultFirebaseOptions {
   // `flutterfire configure` 를 실행하면 실제 Firebase 콘솔의 값으로 교체됩니다.
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBc99RMswMFiXcrCE-BhzFL_s_IzcIbsP4',
-    appId: '1:844476454513:web:8995961cb12ad9c7cd6dd0',
+    apiKey: 'AIzaSyCL6MXSUnmsseR9x3yWoOjFouCgTjoGov4',
+    appId: '1:844476454513:android:ae4d169dffd99f51cd6dd0',
     messagingSenderId: '844476454513',
     projectId: 'capstone-e1eea',
     storageBucket: 'capstone-e1eea.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'REPLACE_WITH_IOS_API_KEY',
-    appId: '1:000000000000:ios:0000000000000000000000',
-    messagingSenderId: '000000000000',
-    projectId: 'REPLACE_WITH_YOUR_FIREBASE_PROJECT_ID',
-    storageBucket: 'REPLACE_WITH_YOUR_FIREBASE_PROJECT_ID.appspot.com',
+    apiKey: 'AIzaSyBBzvZUdPEaQAtX2QCDb84blzCJSx5UvuA',
+    appId: '1:844476454513:ios:94838adca5a5334dcd6dd0',
+    messagingSenderId: '844476454513',
+    projectId: 'capstone-e1eea',
+    storageBucket: 'capstone-e1eea.firebasestorage.app',
     iosBundleId: 'com.example.flutterproject',
   );
 }

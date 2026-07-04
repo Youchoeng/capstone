@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart'; //토큰 추가 코드
 
@@ -74,6 +75,25 @@ class ApiService {
       return data['detail'] ?? '로그인 실패';
     } catch (e) {
       return '서버 연결 실패: $e';
+    }
+  }
+
+  // 로그아웃 ──────────────────────────────────────────────────────
+  static Future<void> logout() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // 1. SharedPreferences 저장 정보 일괄 제거
+      await prefs.remove('access_token');
+      await prefs.remove('current_user_id');
+
+      // 2. 메모리 상의 정적 변수 일괄 초기화
+      token = null;
+      currentUserId = null;
+
+      print("🧹 [ApiService] 로컬 SharedPreferences 세션 초기화가 완료되었습니다.");
+    } catch (e) {
+      print("⚠️ [ApiService] 로컬 세션 파괴 중 오류 발생: $e");
     }
   }
 
@@ -648,13 +668,17 @@ class ApiService {
     }
   }
 
-  static Future<List<dynamic>> getChatHistory(int userId, int peerId) async {
+  static Future<List<dynamic>> getChatHistory(
+    int userId,
+    int peerId,
+    int groupId,
+  ) async {
     try {
       // 이미 정의되어 있는 getHeaders()를 사용해 Authorization Bearer 토큰을 자동으로 주입합니다.
       final headers = await getHeaders();
 
       final response = await http.get(
-        Uri.parse('$baseUrl/chat/history/$userId/$peerId'),
+        Uri.parse('$baseUrl/chat/history/$userId/$peerId?group_id=$groupId'),
         headers: headers, // ⭕ 공통 토큰 헤더 적용
       );
 
@@ -668,6 +692,59 @@ class ApiService {
     } catch (e) {
       print("getChatHistory 네트워크 에러 발생: $e");
       return [];
+    }
+  }
+
+  // ── 채팅 이미지 업로드 ──────────────────────────────────────────
+  static Future<String?> uploadChatImage(File file) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$baseUrl/chat/upload'),
+      );
+
+      final headers = await getHeaders();
+      // Multipart에서는 Content-Type이 자동 지정되므로 Authorization만 추가
+      request.headers['Authorization'] = headers['Authorization'] ?? '';
+
+      request.files.add(await http.MultipartFile.fromPath('file', file.path));
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['ok'] == true) {
+          return data['url'] as String?;
+        }
+      }
+      print("이미지 업로드 실패: ${response.statusCode}");
+      return null;
+    } catch (e) {
+      print("이미지 업로드 중 네트워크 에러: $e");
+      return null;
+    }
+  }
+
+  // ── FCM 토큰 등록 ──────────────────────────────────────────
+  static Future<bool> registerFcmToken(int userId, String fcmToken) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/chat/fcm-token'),
+        headers: await getHeaders(),
+        body: jsonEncode({
+          'user_id': userId,
+          'fcm_token': fcmToken,
+        }),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['ok'] == true;
+      }
+      return false;
+    } catch (e) {
+      print("FCM 토큰 등록 네트워크 에러: $e");
+      return false;
     }
   }
 }

@@ -47,8 +47,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   late List<GroupPost> _posts;
   late List<GroupMember> _members;
 
-  final Map<String, Map<String, dynamic>> _chatDataByUser =
-  Map.from(initialChatData);
+  final Map<String, Map<String, dynamic>> _chatDataByUser = Map.from(
+    initialChatData,
+  );
 
   Widget _buildAppBarTitle() {
     return InkWell(
@@ -62,10 +63,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
           children: [
             Text(
               widget.groupName,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
             ),
             const SizedBox(height: 2),
             Text(
@@ -117,6 +115,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => PersonalChatScreen(
+          groupId: int.parse(widget.group.id),
           userName: leader.name,
           peerId: leader.userId != 0 ? leader.userId : null,
           showExitButton: false,
@@ -150,9 +149,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               Navigator.pop(dialogContext);
 
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('방장에게 가입 신청 쪽지 화면으로 이동합니다.'),
-                ),
+                const SnackBar(content: Text('방장에게 가입 신청 쪽지 화면으로 이동합니다.')),
               );
 
               await _openLeaderJoinChat();
@@ -167,25 +164,19 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   Widget _buildFab() {
     return widget.isMember
         ? FloatingActionButton.extended(
-      heroTag: 'group_detail_write_fab',
-      onPressed: _showWritePostDialog,
-      backgroundColor: Colors.green[600],
-      icon: const Icon(Icons.edit, color: Colors.white),
-      label: const Text(
-        '글쓰기',
-        style: TextStyle(color: Colors.white),
-      ),
-    )
+            heroTag: 'group_detail_write_fab',
+            onPressed: _showWritePostDialog,
+            backgroundColor: Colors.green[600],
+            icon: const Icon(Icons.edit, color: Colors.white),
+            label: const Text('글쓰기', style: TextStyle(color: Colors.white)),
+          )
         : FloatingActionButton.extended(
-      heroTag: 'group_detail_join_fab',
-      onPressed: _showJoinDialog,
-      backgroundColor: Colors.blue[600],
-      icon: const Icon(Icons.person_add, color: Colors.white),
-      label: const Text(
-        '가입하기',
-        style: TextStyle(color: Colors.white),
-      ),
-    );
+            heroTag: 'group_detail_join_fab',
+            onPressed: _showJoinDialog,
+            backgroundColor: Colors.blue[600],
+            icon: const Icon(Icons.person_add, color: Colors.white),
+            label: const Text('가입하기', style: TextStyle(color: Colors.white)),
+          );
   }
 
   @override
@@ -201,7 +192,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
           'messages': List<Map<String, dynamic>>.from(
             (value['messages'] as List?)?.map(
                   (e) => Map<String, dynamic>.from(e as Map),
-            ) ??
+                ) ??
                 [],
           ),
         };
@@ -214,14 +205,20 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
 
   Future<void> _fetchRealMembers() async {
     try {
-      final detail = await ApiService.getGroupDetail(int.parse(widget.group.id));
+      final detail = await ApiService.getGroupDetail(
+        int.parse(widget.group.id),
+      );
       if (detail != null && mounted) {
         setState(() {
-          _members = (detail['members'] as List).map((m) => GroupMember(
-            userId: m['user_id'] ?? 0,
-            name: m['nickname'] ?? '알 수 없음',
-            isLeader: m['is_leader'] == true,
-          )).toList();
+          _members = (detail['members'] as List)
+              .map(
+                (m) => GroupMember(
+                  userId: m['user_id'] ?? 0,
+                  name: m['nickname'] ?? '알 수 없음',
+                  isLeader: m['is_leader'] == true,
+                ),
+              )
+              .toList();
 
           for (var member in _members) {
             if (member.name != widget.userName &&
@@ -279,7 +276,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     final updatedMessages = List<Map<String, dynamic>>.from(
       (chatData['messages'] as List?)?.map(
             (e) => Map<String, dynamic>.from(e as Map),
-      ) ??
+          ) ??
           [],
     );
 
@@ -312,14 +309,15 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => PersonalChatScreen(
+          groupId: int.parse(widget.group.id),
           userName: member.name,
           peerId: member.userId != 0 ? member.userId : null,
           initialMessages: chatData != null
               ? List<Map<String, dynamic>>.from(
-            (chatData['messages'] as List).map(
-                  (e) => Map<String, dynamic>.from(e as Map),
-            ),
-          )
+                  (chatData['messages'] as List).map(
+                    (e) => Map<String, dynamic>.from(e as Map),
+                  ),
+                )
               : null,
         ),
       ),
@@ -341,9 +339,9 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
         // 메인 화면으로도 "이 사람 쪽지방 나갔어!" 하고 신호를 그대로 전달
         widget.onChatDataChanged?.call(member.name, result);
 
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('쪽지방에서 나갔습니다.'))
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('쪽지방에서 나갔습니다.')));
       }
       // 일반적인 대화 후 뒤로가기를 눌렀을 때 (기존 로직)
       else {
@@ -354,7 +352,8 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
           'messages': List<Map<String, dynamic>>.from(
             (result['messages'] as List?)?.map(
                   (e) => Map<String, dynamic>.from(e as Map),
-            ) ?? [],
+                ) ??
+                [],
           ),
         };
 
@@ -422,18 +421,16 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                   child: ListView.separated(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     itemCount: sortedMembers.length,
-                    separatorBuilder: (context, index) => const Divider(
-                      height: 1,
-                      indent: 72,
-                      endIndent: 16,
-                    ),
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1, indent: 72, endIndent: 16),
                     itemBuilder: (context, index) {
                       final member = sortedMembers[index];
                       final chatData = _chatDataByUser[member.name];
-                      final lastMessage =
-                      (chatData?['lastMessage'] ?? '').toString();
+                      final lastMessage = (chatData?['lastMessage'] ?? '')
+                          .toString();
                       final lastTime = (chatData?['lastTime'] ?? '').toString();
-                      final unreadCount = (chatData?['unreadCount'] ?? 0) as int;
+                      final unreadCount =
+                          (chatData?['unreadCount'] ?? 0) as int;
 
                       return ListTile(
                         leading: Stack(
@@ -500,37 +497,37 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
                         subtitle: lastMessage.isEmpty
                             ? null
                             : Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  lastMessage,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: unreadCount > 0
-                                        ? Colors.black87
-                                        : Colors.grey[700],
-                                    fontWeight: unreadCount > 0
-                                        ? FontWeight.w600
-                                        : FontWeight.normal,
-                                  ),
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        lastMessage,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: unreadCount > 0
+                                              ? Colors.black87
+                                              : Colors.grey[700],
+                                          fontWeight: unreadCount > 0
+                                              ? FontWeight.w600
+                                              : FontWeight.normal,
+                                        ),
+                                      ),
+                                    ),
+                                    if (lastTime.isNotEmpty) ...[
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        lastTime,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
-                              if (lastTime.isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                Text(
-                                  lastTime,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
                         trailing: TextButton.icon(
                           onPressed: () async {
                             Navigator.pop(bottomSheetContext);
@@ -593,13 +590,13 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       backgroundColor: Colors.grey[200],
       endDrawer: widget.isLeader
           ? LeaderManageDrawer(
-        group: widget.group,
-        onUpdate: () {
-          setState(() {
-            _syncMembersAndChat();
-          });
-        },
-      )
+              group: widget.group,
+              onUpdate: () {
+                setState(() {
+                  _syncMembersAndChat();
+                });
+              },
+            )
           : null,
       appBar: AppBar(
         backgroundColor: Colors.green[100],
@@ -637,20 +634,17 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
               onTap: () => _navigateToDetail(notices.first),
             ),
           SliverList(
-            delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                final post = normalPosts[index];
-                return GroupPostCard(
-                  post: post,
-                  userName: widget.userName,
-                  isLeader: widget.isLeader,
-                  onTap: () => _navigateToDetail(post),
-                  onEdit: () => _editPost(post),
-                  onDelete: () => _deletePost(post),
-                );
-              },
-              childCount: normalPosts.length,
-            ),
+            delegate: SliverChildBuilderDelegate((context, index) {
+              final post = normalPosts[index];
+              return GroupPostCard(
+                post: post,
+                userName: widget.userName,
+                isLeader: widget.isLeader,
+                onTap: () => _navigateToDetail(post),
+                onEdit: () => _editPost(post),
+                onDelete: () => _deletePost(post),
+              );
+            }, childCount: normalPosts.length),
           ),
         ],
       ),

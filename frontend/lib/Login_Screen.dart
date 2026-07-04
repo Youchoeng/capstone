@@ -29,9 +29,9 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _pwController.text;
 
     if (userId.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('아이디와 비밀번호를 입력해 주세요.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('아이디와 비밀번호를 입력해 주세요.')));
       return;
     }
 
@@ -43,9 +43,9 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
 
     if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
     } else {
       final me = await ApiService.getMe();
       if (me != null && me['internal_id'] != null) {
@@ -64,7 +64,10 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('시작하기', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          '시작하기',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.blue[100],
         elevation: 0,
       ),
@@ -86,7 +89,9 @@ class _LoginScreenState extends State<LoginScreen> {
               decoration: InputDecoration(
                 labelText: '아이디',
                 labelStyle: const TextStyle(fontSize: 18),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 prefixIcon: const Icon(Icons.person),
               ),
               style: const TextStyle(fontSize: 20),
@@ -99,7 +104,9 @@ class _LoginScreenState extends State<LoginScreen> {
               decoration: InputDecoration(
                 labelText: '비밀번호',
                 labelStyle: const TextStyle(fontSize: 18),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 prefixIcon: const Icon(Icons.lock),
               ),
               style: const TextStyle(fontSize: 20),

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'Setting_Verify_Current_Password_Screen.dart';
 import 'Setting_Change_Nickname_Screen.dart';
 import 'Setting_Change_Password_Screen.dart';
+import 'Login_Screen.dart';
+import 'services/chat_runtime.dart';
+import 'api_service.dart';
 
 // 🌟 1. 앱 전체 폰트 크기를 들고 있는 '방송국' (전역 변수)
 final ValueNotifier<double> globalFontScale = ValueNotifier<double>(1.0);
@@ -216,6 +219,45 @@ class _HomeSettingsScreenState extends State<HomeSettingsScreen> {
             title: '비밀번호 변경',
             subtitle: '현재 비밀번호 확인 후 변경',
             onTap: _goToPasswordChange,
+          ),
+
+          // 로그아웃 메뉴
+          Card(
+            margin: const EdgeInsets.only(top: 12, bottom: 24),
+            color: Colors.red[50],
+            child: ListTile(
+              leading: Icon(
+                Icons.exit_to_app,
+                size: 30,
+                color: Colors.red[700],
+              ),
+              title: const Text(
+                '로그아웃',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.red,
+                ),
+              ),
+              subtitle: const Text('채팅 세션을 종료하고 로그인 화면으로 이동합니다.'),
+              trailing: const Icon(Icons.chevron_right, color: Colors.red),
+              onTap: () async {
+                // 1. 전역 채팅 싱글톤의 모든 소켓 커넥션 및 런타임 메모리 즉시 파괴
+                await ChatRuntime.instance.stop();
+
+                // 2. ApiService에 등록된 로컬 SharedPreferences 저장소 비우기
+                await ApiService.logout();
+
+                if (!mounted) return;
+
+                // 3. 로그인 화면으로 안전하게 튕겨내기
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LoginScreen()),
+                  (route) => false, // 기존 내비게이션 스택 전부 제거
+                );
+              },
+            ),
           ),
         ],
       ),

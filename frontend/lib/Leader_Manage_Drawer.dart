@@ -22,7 +22,10 @@ class _LeaderManageDrawerState extends State<LeaderManageDrawer> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => PersonalChatScreen(userName: userName),
+        builder: (context) => PersonalChatScreen(
+          groupId: int.parse(widget.group.id),
+          userName: userName,
+        ),
       ),
     );
   }

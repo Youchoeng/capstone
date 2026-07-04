@@ -10,6 +10,10 @@ class ChatMessageBase(SQLModel):
     # project의 User 테이블은 internal_id를 PK로 사용
     receiver_id: int = Field(foreign_key="user.internal_id")
     sender_id: int = Field(foreign_key="user.internal_id")
+    group_id: int = Field(default=0, index=True)
+    message_type: str = Field(default="text")
+    media_url: Optional[str] = Field(default=None)
+    is_deleted: bool = Field(default=False)
 
 class ChatMessage(ChatMessageBase, table=True):
     id: int | None = Field(default=None, primary_key=True)

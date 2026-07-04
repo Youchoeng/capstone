@@ -6,12 +6,17 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'services/chat_runtime.dart';
 import 'services/local_chat_db.dart';
 import 'package:flutterproject/api_service.dart';
 
 class PersonalChatScreen extends StatefulWidget {
+  /// 모임방 ID (새로운 1:1 채팅 분리 기준)
+  final int groupId;
+
   /// 화면 상단에 표시할 상대 닉네임
   final String userName;
 
@@ -35,6 +40,7 @@ class PersonalChatScreen extends StatefulWidget {
 
   const PersonalChatScreen({
     super.key,
+    required this.groupId,
     required this.userName,
     this.peerId,
     this.showExitButton = true,
@@ -71,11 +77,12 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
 
     // 새로 도착하는 메시지 / 상태 변경 구독
     _incomingSub = LocalChatDb.instance.messageStream.listen((msg) {
-      if (msg.peerId != peerId) return;
+      if (msg.groupId != widget.groupId || msg.peerId != peerId) return;
+
+      // 1. 이미 화면에 존재하는 메시지인지 clientMsgId로 먼저 찾기
+      final idx = _messages.indexWhere((m) => m.clientMsgId == msg.clientMsgId);
+
       setState(() {
-        final idx = _messages.indexWhere(
-          (m) => m.clientMsgId == msg.clientMsgId,
-        );
         if (idx >= 0) {
           _messages[idx] = msg;
         } else {
@@ -88,85 +95,128 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
 
   Future<void> _syncAndLoadMessages(int peerId) async {
     await LocalChatDb.instance.upsertConversation(
+      groupId: widget.groupId,
       peerId: peerId,
       peerNickname: widget.userName,
     );
 
-    try {
-      final enterPayload = {"type": "enter_room", "peer_id": peerId};
+    // 쪽지방 진입 즉시 안 읽음 배지 숫자를 0으로 청소
+    await LocalChatDb.instance.markRead(widget.groupId, peerId);
 
-      await ChatRuntime.instance.socket.send(
-        peerId: peerId,
-        content: jsonEncode(enterPayload),
-      );
-      debugPrint("공식 enter_room 패킷을 전송했습니다.");
-    } catch (e) {
-      debugPrint("enter_room 패킷 전송 실패: $e");
+    final localHistory = await LocalChatDb.instance.loadMessages(
+      widget.groupId,
+      peerId,
+    );
+    if (mounted) {
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(localHistory);
+      });
+      _scrollToBottom();
     }
 
     try {
+      ChatRuntime.instance.socket.sendRaw(
+        jsonEncode({
+          "type": "enter_room",
+          "group_id": widget.groupId,
+          "peer_id": peerId,
+        }),
+      );
+      debugPrint(
+        "✅ enter_room 패킷 전송 완료 (group_id: ${widget.groupId}, peer_id: $peerId)",
+      );
+    } catch (e) {
+      debugPrint("⚠️ enter_room 패킷 전송 실패: $e");
+    }
+
+    _performBackgroundSync(widget.groupId, peerId);
+  }
+
+  Future<void> _performBackgroundSync(int groupId, int peerId) async {
+    try {
       final myIdStr = ApiService.currentUserId;
-      debugPrint("동기화 확인 - 현재 유저 ID 문자열: $myIdStr");
-      if (myIdStr != null) {
-        final int? myId = int.tryParse(myIdStr);
-        if (myId == null) {
-          debugPrint("⚠️ 현재 유저 ID($myIdStr)가 숫자 형식이 아닙니다. int로 파싱할 수 없습니다.");
-          return;
-        }
+      if (myIdStr == null) return;
+      final int? myId = int.tryParse(myIdStr);
+      if (myId == null) return;
 
-        debugPrint("서버에 채팅 히스토리 요청 중... 내ID: $myId, 상대ID: $peerId");
+      final List<dynamic> remoteMessages = await ApiService.getChatHistory(
+        myId,
+        peerId,
+        groupId,
+      );
+      if (remoteMessages.isEmpty) return;
 
-        final List<dynamic> remoteMessages = await ApiService.getChatHistory(
-          myId,
+      final List<StoredMessage> batchList = [];
+
+      for (final msg in remoteMessages) {
+        final int senderId = msg['sender_id'] as int;
+        final rawTs = msg['timestamp'] as String?;
+        final sentAt =
+            (rawTs != null ? DateTime.tryParse(rawTs) : null)?.toUtc() ??
+            DateTime.now().toUtc();
+        final rawId = msg['client_msg_id'] as String?;
+        final clientMsgId = (rawId != null && rawId.isNotEmpty)
+            ? rawId
+            : 'server-${msg['id']}';
+
+        final bool isRead = msg['is_read'] == true;
+        final String status = isRead ? 'read' : 'sent';
+        final bool serverDeleted = msg['is_deleted'] == true;
+
+        final String messageType = msg['message_type'] as String? ?? 'text';
+        final String? mediaUrl = msg['media_url'] as String?;
+
+        batchList.add(
+          StoredMessage(
+            groupId: widget.groupId,
+            clientMsgId: clientMsgId,
+            peerId: peerId,
+            senderId: senderId,
+            content: msg['content'] as String,
+            sentAt: sentAt,
+            status: status,
+            isMine: senderId == myId,
+            isDeleted: serverDeleted,
+            messageType: messageType,
+            mediaUrl: mediaUrl,
+          ),
+        );
+      }
+
+      if (batchList.isNotEmpty) {
+        await LocalChatDb.instance.saveMessagesBatch(batchList);
+
+        // 싱크 완료 후 한 번 더 로컬 최신 목록으로 화면 UI 갱신 유도
+        final updatedLocalHistory = await LocalChatDb.instance.loadMessages(
+          widget.groupId,
           peerId,
         );
-        debugPrint("서버에서 받은 메시지 개수: ${remoteMessages.length}");
-
-        for (var msg in remoteMessages) {
-          final int senderId = msg['sender_id'] as int;
-
-          await LocalChatDb.instance.saveMessage(
-            StoredMessage(
-              clientMsgId: msg['client_msg_id'] ?? 'server-${msg['id']}',
-              peerId: peerId,
-              senderId: senderId,
-              content: msg['content'] as String,
-              sentAt: DateTime.parse(
-                msg['created_at'] ?? DateTime.now().toUtc().toIso8601String(),
-              ),
-              status: 'read',
-              isMine: senderId == myId,
-            ),
-          );
+        if (mounted) {
+          setState(() {
+            _messages
+              ..clear()
+              ..addAll(updatedLocalHistory);
+          });
+          _scrollToBottom();
         }
       }
     } catch (e) {
-      debugPrint("서버 백로그 동기화 실패(오프라인 등): $e");
+      debugPrint("서버 백로그 백그라운드 동기화 실패: $e");
     }
-
-    final history = await LocalChatDb.instance.loadMessages(peerId);
-    if (!mounted) return;
-
-    setState(() {
-      _messages
-        ..clear()
-        ..addAll(history);
-    });
-    _scrollToBottom();
-
-    // 화면 진입 시 미확인 카운트 초기화
-    await LocalChatDb.instance.markRead(peerId);
   }
 
   @override
   void dispose() {
     try {
-      final leavePayload = {"type": "leave_room"};
+      final leavePayload = {
+        "type": "leave_room",
+        "group_id": widget.groupId,
+        "peer_id": widget.effectivePeerId,
+      };
       // .send() 메서드를 활용해 leave_room 전송 처리
-      ChatRuntime.instance.socket.send(
-        peerId: widget.effectivePeerId,
-        content: jsonEncode(leavePayload),
-      );
+      ChatRuntime.instance.socket.sendRaw(jsonEncode(leavePayload));
     } catch (e) {
       debugPrint("leave_room 통보 실패: $e");
     }
@@ -178,8 +228,7 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
     if (ChatRuntime.instance.activeChatPeerId == widget.effectivePeerId) {
       ChatRuntime.instance.activeChatPeerId = null;
     }
-    // ── 채팅 UI 닫힘 → WS 해제 ──
-    ChatRuntime.instance.disconnectSocket();
+
     super.dispose();
   }
 
@@ -219,6 +268,7 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
       //   ③ 백엔드 규격('peer_id')에 맞춰 소켓 전송
       // 이 모든 것을 알아서 한 방에 처리해 줍니다.
       await ChatRuntime.instance.socket.send(
+        groupId: widget.groupId,
         peerId: widget.effectivePeerId,
         content: text, // 👈 jsonEncode 하지 않은 순수한 문자열(text)만 넘겨야 합니다!
       );
@@ -227,6 +277,35 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
     } catch (e) {
       // 소켓 자체의 치명적인 에러 캐치 시
       debugPrint("❌ 웹소켓 실시간 릴레이 실패: $e");
+    }
+  }
+
+  Future<void> _uploadImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile == null) return;
+
+    final file = File(pickedFile.path);
+    final url = await ApiService.uploadChatImage(file);
+    if (url != null) {
+      try {
+        await ChatRuntime.instance.socket.send(
+          groupId: widget.groupId,
+          peerId: widget.effectivePeerId,
+          content: '(사진)',
+          messageType: 'image',
+          mediaUrl: url,
+        );
+        debugPrint("🚀 사진 전송 성공 완료!");
+      } catch (e) {
+        debugPrint("❌ 사진 웹소켓 실시간 릴레이 실패: $e");
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('사진 업로드에 실패했습니다.')));
+      }
     }
   }
 
@@ -292,27 +371,22 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
   }
 
   Widget _buildStatusLabel(StoredMessage m) {
-    if (!m.isMine) return const SizedBox.shrink();
-    String text;
-    Color color = Colors.grey;
-    switch (m.status) {
-      case 'pending':
-        text = '전송중';
-        break;
-      case 'sent':
-        text = '전송됨';
-        break;
-      case 'delivered':
-        text = '전달됨';
-        break;
-      case 'read':
-        text = '읽음';
-        color = Colors.green;
-        break;
-      default:
-        text = '';
+    if (!m.isMine || m.status == 'read') return const SizedBox.shrink();
+    if (m.status == 'pending') {
+      return const Text(
+        '...',
+        style: TextStyle(fontSize: 11, color: Colors.grey),
+      );
     }
-    return Text(text, style: TextStyle(fontSize: 11, color: color));
+    // sent 또는 delivered 상태
+    return const Text(
+      '1',
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
+        color: Color(0xFFFBC02D),
+      ),
+    );
   }
 
   Widget _buildMessageBubble(StoredMessage message) {
@@ -342,33 +416,63 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
             const SizedBox(width: 6),
           ],
           Flexible(
-            child: CustomPaint(
-              painter: _BubbleTailPainter(isMe: isMe),
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 260),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: isMe ? const Color(0xFFFFEB3B) : Colors.white,
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(16),
-                    topRight: const Radius.circular(16),
-                    bottomLeft: Radius.circular(isMe ? 16 : 4),
-                    bottomRight: Radius.circular(isMe ? 4 : 16),
+            child: GestureDetector(
+              onLongPress: isMe && !(message.isDeleted == true)
+                  ? () => _showDeleteConfirmationDialog(context, message)
+                  : null,
+              child: CustomPaint(
+                painter: _BubbleTailPainter(isMe: isMe),
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 260),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
                   ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.06),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
+                  decoration: BoxDecoration(
+                    color: message.isDeleted == true
+                        ? Colors.grey[200]
+                        : (isMe ? const Color(0xFFFFEB3B) : Colors.white),
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
+                      bottomLeft: Radius.circular(isMe ? 16 : 4),
+                      bottomRight: Radius.circular(isMe ? 4 : 16),
                     ),
-                  ],
-                ),
-                child: Text(
-                  message.content,
-                  style: const TextStyle(fontSize: 15, color: Colors.black87),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: message.isDeleted == true
+                      ? const Text(
+                          '삭제된 메시지입니다.',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        )
+                      : (message.messageType == 'image' &&
+                                message.mediaUrl != null
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  '${ApiService.baseUrl}${message.mediaUrl}',
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (ctx, err, stack) =>
+                                      const Text('이미지 로드 실패'),
+                                ),
+                              )
+                            : Text(
+                                message.content,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  color: Colors.black87,
+                                ),
+                              )),
                 ),
               ),
             ),
@@ -380,6 +484,38 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
               style: const TextStyle(fontSize: 11, color: Colors.grey),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteConfirmationDialog(
+    BuildContext context,
+    StoredMessage message,
+  ) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('메시지 삭제'),
+        content: const Text('이 메시지를 삭제하시겠습니까?\n삭제된 메시지는 상대방 화면에서도 보이지 않습니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ChatRuntime.instance.socket.deleteMessage(
+                message.clientMsgId,
+                widget.effectivePeerId,
+              );
+            },
+            child: const Text(
+              '삭제',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            ),
+          ),
         ],
       ),
     );
@@ -472,6 +608,13 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
               ),
               child: Row(
                 children: [
+                  IconButton(
+                    icon: const Icon(
+                      Icons.add_photo_alternate,
+                      color: Colors.grey,
+                    ),
+                    onPressed: _uploadImage,
+                  ),
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14),

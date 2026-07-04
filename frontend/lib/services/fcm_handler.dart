@@ -26,6 +26,7 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 
@@ -35,6 +36,7 @@ import 'local_chat_db.dart';
 /// 백그라운드/종료 상태에서 호출되는 핸들러 (top-level 필수)
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  WidgetsFlutterBinding.ensureInitialized();
   // 백그라운드 isolate 에서도 Firebase / SQLite 사용 가능하도록 초기화
   await Firebase.initializeApp();
   await _persistChatMessage(message);
@@ -48,15 +50,23 @@ Future<void> _persistChatMessage(RemoteMessage message) async {
   final senderId = int.tryParse(senderIdStr) ?? 0;
   if (senderId == 0) return;
 
+  final groupIdStr = data['group_id'] as String? ?? '0';
+  final groupId = int.tryParse(groupIdStr) ?? 0;
+
   final content = data['content'] as String? ?? '';
-  final clientMsgId = data['client_msg_id'] as String? ??
+  final clientMsgId =
+      data['client_msg_id'] as String? ??
       'fcm-${DateTime.now().millisecondsSinceEpoch}';
   final sentAt =
       DateTime.tryParse(data['sent_at'] as String? ?? '')?.toUtc() ??
-          DateTime.now().toUtc();
+      DateTime.now().toUtc();
+
+  final messageType = data['msg_type'] as String? ?? 'text';
+  final mediaUrl = data['media_url'] as String?;
 
   await LocalChatDb.instance.saveMessage(
     StoredMessage(
+      groupId: groupId,
       clientMsgId: clientMsgId,
       peerId: senderId,
       senderId: senderId,
@@ -64,14 +74,19 @@ Future<void> _persistChatMessage(RemoteMessage message) async {
       sentAt: sentAt,
       status: 'received',
       isMine: false,
+      messageType: messageType,
+      mediaUrl: mediaUrl,
     ),
   );
 
   // 대화방 닉네임을 최초 1회라도 채워두기
   final nick = data['sender_nickname'] as String? ?? '';
   if (nick.isNotEmpty) {
-    await LocalChatDb.instance
-        .upsertConversation(peerId: senderId, peerNickname: nick);
+    await LocalChatDb.instance.upsertConversation(
+      groupId: groupId,
+      peerId: senderId,
+      peerNickname: nick,
+    );
   }
 }
 
@@ -92,17 +107,15 @@ class FcmChatHandler {
     final messaging = FirebaseMessaging.instance;
 
     // 권한 요청 (iOS/Android 13+)
-    await messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    await messaging.requestPermission(alert: true, badge: true, sound: true);
 
     // 로컬 알림 초기화 (포그라운드에서 직접 알림 띄우기 위함)
-    await _localNoti.initialize(const InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      iOS: DarwinInitializationSettings(),
-    ));
+    await _localNoti.initialize(
+      const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        iOS: DarwinInitializationSettings(),
+      ),
+    );
 
     // 토큰 등록
     final token = await messaging.getToken();

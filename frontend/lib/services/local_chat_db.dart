@@ -25,59 +25,79 @@ import 'package:sqflite/sqflite.dart';
 class StoredMessage {
   final int? rowId;
   final String clientMsgId;
-  final int peerId;          // 대화 상대의 internal_id
-  final int senderId;        // 메시지 보낸 사람의 internal_id
+  final int groupId;
+  final int peerId; // 대화 상대의 internal_id
+  final int senderId; // 메시지 보낸 사람의 internal_id
   final String content;
-  final DateTime sentAt;     // UTC 기준
+  final DateTime sentAt; // UTC 기준
   final String status;
   final bool isMine;
+  final String messageType;
+  final String? mediaUrl;
+  final bool isDeleted;
 
   StoredMessage({
     this.rowId,
     required this.clientMsgId,
+    required this.groupId,
     required this.peerId,
     required this.senderId,
     required this.content,
     required this.sentAt,
     required this.status,
     required this.isMine,
+    this.messageType = 'text',
+    this.mediaUrl,
+    this.isDeleted = false,
   });
 
   Map<String, Object?> toMap() => {
-        'client_msg_id': clientMsgId,
-        'peer_id': peerId,
-        'sender_id': senderId,
-        'content': content,
-        'sent_at': sentAt.toUtc().toIso8601String(),
-        'status': status,
-        'is_mine': isMine ? 1 : 0,
-      };
+    'client_msg_id': clientMsgId,
+    'group_id': groupId,
+    'peer_id': peerId,
+    'sender_id': senderId,
+    'content': content,
+    'sent_at': sentAt.toUtc().toIso8601String(),
+    'status': status,
+    'is_mine': isMine ? 1 : 0,
+    'message_type': messageType,
+    'media_url': mediaUrl,
+    'is_deleted': isDeleted ? 1 : 0,
+  };
 
   static StoredMessage fromMap(Map<String, Object?> m) => StoredMessage(
-        rowId: m['id'] as int?,
-        clientMsgId: m['client_msg_id'] as String,
-        peerId: m['peer_id'] as int,
-        senderId: m['sender_id'] as int,
-        content: m['content'] as String,
-        sentAt: DateTime.parse(m['sent_at'] as String).toUtc(),
-        status: m['status'] as String,
-        isMine: (m['is_mine'] as int) == 1,
-      );
+    rowId: m['id'] as int?,
+    clientMsgId: m['client_msg_id'] as String,
+    groupId: m['group_id'] as int,
+    peerId: m['peer_id'] as int,
+    senderId: m['sender_id'] as int,
+    content: m['content'] as String,
+    sentAt: DateTime.parse(m['sent_at'] as String).toUtc(),
+    status: m['status'] as String,
+    isMine: (m['is_mine'] as int) == 1,
+    messageType: (m['message_type'] as String?) ?? 'text',
+    mediaUrl: m['media_url'] as String?,
+    isDeleted: ((m['is_deleted'] as int?) ?? 0) == 1,
+  );
 }
 
 class Conversation {
+  final int groupId;
   final int peerId;
   final String peerNickname;
   final String? lastMessage;
   final DateTime? lastMessageAt;
   final int unreadCount;
+  final bool isExited;
 
   Conversation({
+    required this.groupId,
     required this.peerId,
     required this.peerNickname,
     required this.lastMessage,
     required this.lastMessageAt,
     required this.unreadCount,
+    this.isExited = false,
   });
 }
 
@@ -86,8 +106,7 @@ class LocalChatDb {
   static final LocalChatDb instance = LocalChatDb._();
 
   Database? _db;
-  final _messageStreamController =
-      StreamController<StoredMessage>.broadcast();
+  final _messageStreamController = StreamController<StoredMessage>.broadcast();
 
   /// 새 메시지가 저장될 때마다 흘러나오는 스트림 (UI 가 구독해서 즉시 갱신)
   Stream<StoredMessage> get messageStream => _messageStreamController.stream;
@@ -107,15 +126,18 @@ class LocalChatDb {
 
     _db = await openDatabase(
       path,
-      version: 1,
+      version: 4,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE conversations (
-            peer_id          INTEGER PRIMARY KEY,
+            group_id         INTEGER NOT NULL,
+            peer_id          INTEGER NOT NULL,
             peer_nickname    TEXT NOT NULL,
             last_message     TEXT,
             last_message_at  TEXT,
-            unread_count     INTEGER NOT NULL DEFAULT 0
+            unread_count     INTEGER NOT NULL DEFAULT 0,
+            is_exited        INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (group_id, peer_id)
           );
         ''');
 
@@ -123,18 +145,60 @@ class LocalChatDb {
           CREATE TABLE messages (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             client_msg_id  TEXT NOT NULL UNIQUE,
+            group_id       INTEGER NOT NULL,
             peer_id        INTEGER NOT NULL,
             sender_id      INTEGER NOT NULL,
             content        TEXT NOT NULL,
             sent_at        TEXT NOT NULL,
             status         TEXT NOT NULL,
-            is_mine        INTEGER NOT NULL
+            is_mine        INTEGER NOT NULL,
+            message_type   TEXT NOT NULL DEFAULT 'text',
+            media_url      TEXT,
+            is_deleted     INTEGER NOT NULL DEFAULT 0
           );
         ''');
 
         await db.execute(
-          'CREATE INDEX idx_messages_peer_time ON messages(peer_id, sent_at);',
+          'CREATE INDEX idx_messages_group_peer_time ON messages(group_id, peer_id, sent_at);',
         );
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE messages ADD COLUMN message_type TEXT NOT NULL DEFAULT \'text\';',
+          );
+          await db.execute('ALTER TABLE messages ADD COLUMN media_url TEXT;');
+          await db.execute(
+            'ALTER TABLE messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0;',
+          );
+        }
+        if (oldVersion < 3) {
+          await db.execute(
+            'ALTER TABLE conversations ADD COLUMN is_exited INTEGER NOT NULL DEFAULT 0;',
+          );
+        }
+        if (oldVersion < 4) {
+          await db.execute('DROP TABLE IF EXISTS conversations;');
+          await db.execute('''
+            CREATE TABLE conversations (
+              group_id         INTEGER NOT NULL,
+              peer_id          INTEGER NOT NULL,
+              peer_nickname    TEXT NOT NULL,
+              last_message     TEXT,
+              last_message_at  TEXT,
+              unread_count     INTEGER NOT NULL DEFAULT 0,
+              is_exited        INTEGER NOT NULL DEFAULT 0,
+              PRIMARY KEY (group_id, peer_id)
+            );
+          ''');
+          await db.execute(
+            'ALTER TABLE messages ADD COLUMN group_id INTEGER NOT NULL DEFAULT 0;',
+          );
+          await db.execute('DROP INDEX IF EXISTS idx_messages_peer_time;');
+          await db.execute(
+            'CREATE INDEX idx_messages_group_peer_time ON messages(group_id, peer_id, sent_at);',
+          );
+        }
       },
     );
     return _db!;
@@ -143,8 +207,10 @@ class LocalChatDb {
   // ───────────── conversations ─────────────
 
   Future<void> upsertConversation({
+    required int groupId,
     required int peerId,
     required String peerNickname,
+    int isExited = 0,
   }) async {
     try {
       final db = await _open();
@@ -152,22 +218,31 @@ class LocalChatDb {
       // 기존 대화방이 있으면 닉네임만 갱신, 없으면 새로 생성
       final existing = await db.query(
         'conversations',
-        where: 'peer_id = ?',
-        whereArgs: [peerId],
+        where: 'group_id = ? AND peer_id = ?',
+        whereArgs: [groupId, peerId],
         limit: 1,
       );
       if (existing.isEmpty) {
         await db.insert('conversations', {
+          'group_id': groupId,
           'peer_id': peerId,
           'peer_nickname': peerNickname,
           'unread_count': 0,
+          'is_exited': isExited,
         });
-      } else if (peerNickname.isNotEmpty) {
+      } else {
+        // 기존 방이 이미 존재할 때
+        final Map<String, dynamic> updateData = {'is_exited': isExited};
+
+        // 만약 닉네임이 비어있지 않다면 닉네임 변경사항도 같이 업데이트 맵에 추가합니다.
+        if (peerNickname.isNotEmpty) {
+          updateData['peer_nickname'] = peerNickname;
+        }
         await db.update(
           'conversations',
-          {'peer_nickname': peerNickname},
-          where: 'peer_id = ?',
-          whereArgs: [peerId],
+          updateData,
+          where: 'group_id = ? AND peer_id = ?',
+          whereArgs: [groupId, peerId],
         );
       }
     } catch (e, st) {
@@ -179,26 +254,58 @@ class LocalChatDb {
     final db = await _open();
     final rows = await db.query(
       'conversations',
+      where: 'is_exited = 0',
       orderBy: 'last_message_at DESC',
     );
-    return rows.map((m) => Conversation(
-          peerId: m['peer_id'] as int,
-          peerNickname: m['peer_nickname'] as String,
-          lastMessage: m['last_message'] as String?,
-          lastMessageAt: (m['last_message_at'] as String?) == null
-              ? null
-              : DateTime.parse(m['last_message_at'] as String).toUtc(),
-          unreadCount: (m['unread_count'] as int?) ?? 0,
-        )).toList();
+    return rows
+        .map(
+          (m) => Conversation(
+            groupId: m['group_id'] as int,
+            peerId: m['peer_id'] as int,
+            peerNickname: m['peer_nickname'] as String,
+            lastMessage: m['last_message'] as String?,
+            lastMessageAt: (m['last_message_at'] as String?) == null
+                ? null
+                : DateTime.parse(m['last_message_at'] as String).toUtc(),
+            unreadCount: (m['unread_count'] as int?) ?? 0,
+            isExited: ((m['is_exited'] as int?) ?? 0) == 1,
+          ),
+        )
+        .toList();
   }
 
-  Future<void> markRead(int peerId) async {
+  Future<void> syncConversationsBatch(
+    List<Map<String, dynamic>> conversations,
+  ) async {
+    if (conversations.isEmpty) return;
+    try {
+      final db = await _open();
+
+      await db.transaction((txn) async {
+        for (final conv in conversations) {
+          await txn.insert('conversations', {
+            'group_id': conv['group_id'],
+            'peer_id': conv['peer_id'],
+            'peer_nickname': conv['peer_nickname'] ?? '',
+            'last_message': conv['last_message'],
+            'last_message_at': conv['last_message_at'],
+            'unread_count': conv['unread_count'] ?? 0,
+            'is_exited': 0,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      });
+    } catch (e, st) {
+      debugPrint('LocalChatDb syncConversationsBatch error: $e\n$st');
+    }
+  }
+
+  Future<void> markRead(int groupId, int peerId) async {
     final db = await _open();
     await db.update(
       'conversations',
       {'unread_count': 0},
-      where: 'peer_id = ?',
-      whereArgs: [peerId],
+      where: 'group_id = ? AND peer_id = ?',
+      whereArgs: [groupId, peerId],
     );
   }
 
@@ -212,11 +319,86 @@ class LocalChatDb {
   /// - last_message / last_message_at 도 신규일 때만 갱신
   ///
   /// 즉 두 번째 호출은 사실상 status 갱신용으로만 동작.
-  Future<StoredMessage> saveMessage(StoredMessage msg) async {
+  Future<void> saveMessagesBatch(List<StoredMessage> messages) async {
+    if (messages.isEmpty) return;
     try {
       final db = await _open();
 
-      // 0) 이미 같은 client_msg_id 가 저장돼 있는지 확인
+      // 🛠️ 트랜잭션 블록 내에서 DML을 수행하여 디스크 동기화(fsync) 횟수를 1회로 최적화합니다.
+      await db.transaction((txn) async {
+        for (final msg in messages) {
+          // 0) 이미 저장된 client_msg_id 검사
+          final existingMsg = await txn.query(
+            'messages',
+            columns: ['id'],
+            where: 'client_msg_id = ?',
+            whereArgs: [msg.clientMsgId],
+            limit: 1,
+          );
+          final isFreshInsert = existingMsg.isEmpty;
+
+          // 1) 메시지 인서트 (트랜잭션용 txn 객체 사용 필수!)
+          await txn.insert(
+            'messages',
+            msg.toMap(),
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+
+          // 2) 대화방 메타 갱신
+          if (isFreshInsert) {
+            final isUnreadIncrement = !msg.isMine && msg.status != 'read';
+
+            final existing = await txn.query(
+              'conversations',
+              where: 'group_id = ? AND peer_id = ?',
+              whereArgs: [msg.groupId, msg.peerId],
+              limit: 1,
+            );
+
+            if (existing.isEmpty) {
+              await txn.insert('conversations', {
+                'group_id': msg.groupId,
+                'peer_id': msg.peerId,
+                'peer_nickname': '',
+                'last_message': msg.content,
+                'last_message_at': msg.sentAt.toUtc().toIso8601String(),
+                'unread_count': isUnreadIncrement ? 1 : 0,
+                'is_exited': 0,
+              });
+            } else {
+              final currentUnread =
+                  (existing.first['unread_count'] as int?) ?? 0;
+              await txn.update(
+                'conversations',
+                {
+                  'last_message': msg.content,
+                  'last_message_at': msg.sentAt.toUtc().toIso8601String(),
+                  'unread_count': isUnreadIncrement
+                      ? currentUnread + 1
+                      : currentUnread,
+                  'is_exited': 0,
+                },
+                where: 'group_id = ? AND peer_id = ?',
+                whereArgs: [msg.groupId, msg.peerId],
+              );
+            }
+          }
+        }
+      });
+
+      // 3) 트랜잭션이 완벽히 끝나 락이 풀린 직후에 스트림에 방출하여 UI를 리렌더링시킵니다.
+      for (final msg in messages) {
+        _messageStreamController.add(msg);
+      }
+    } catch (e, st) {
+      debugPrint('LocalChatDb saveMessagesBatch error: $e\n$st');
+    }
+  }
+
+  /// 1개 메시지 단독 저장용 (기존 코드 안전성 보강)
+  Future<StoredMessage> saveMessage(StoredMessage msg) async {
+    try {
+      final db = await _open();
       final existingMsg = await db.query(
         'messages',
         columns: ['id'],
@@ -226,29 +408,29 @@ class LocalChatDb {
       );
       final isFreshInsert = existingMsg.isEmpty;
 
-      // 1) 메시지 저장 (있으면 교체 — status 갱신 가능)
       await db.insert(
         'messages',
         msg.toMap(),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
 
-      // 2) 대화방 메타는 "신규 메시지" 일 때만 갱신
       if (isFreshInsert) {
         final isUnreadIncrement = !msg.isMine && msg.status != 'read';
         final existing = await db.query(
           'conversations',
-          where: 'peer_id = ?',
-          whereArgs: [msg.peerId],
+          where: 'group_id = ? AND peer_id = ?',
+          whereArgs: [msg.groupId, msg.peerId],
           limit: 1,
         );
         if (existing.isEmpty) {
           await db.insert('conversations', {
+            'group_id': msg.groupId,
             'peer_id': msg.peerId,
             'peer_nickname': '',
             'last_message': msg.content,
             'last_message_at': msg.sentAt.toUtc().toIso8601String(),
             'unread_count': isUnreadIncrement ? 1 : 0,
+            'is_exited': 0,
           });
         } else {
           final currentUnread = (existing.first['unread_count'] as int?) ?? 0;
@@ -257,11 +439,13 @@ class LocalChatDb {
             {
               'last_message': msg.content,
               'last_message_at': msg.sentAt.toUtc().toIso8601String(),
-              'unread_count':
-                  isUnreadIncrement ? currentUnread + 1 : currentUnread,
+              'unread_count': isUnreadIncrement
+                  ? currentUnread + 1
+                  : currentUnread,
+              'is_exited': 0,
             },
-            where: 'peer_id = ?',
-            whereArgs: [msg.peerId],
+            where: 'group_id = ? AND peer_id = ?',
+            whereArgs: [msg.groupId, msg.peerId],
           );
         }
       }
@@ -269,7 +453,6 @@ class LocalChatDb {
       debugPrint('LocalChatDb saveMessage error: $e\n$st');
     }
 
-    // 항상 스트림에 흘려보냄 — UI 가 status 변경(예: pending→delivered)도 받아 재렌더링.
     _messageStreamController.add(msg);
     return msg;
   }
@@ -299,13 +482,48 @@ class LocalChatDb {
     }
   }
 
-  Future<List<StoredMessage>> loadMessages(int peerId, {int limit = 200}) async {
+  Future<void> updateMessageStatus(String clientMsgId, String status) async {
+    return updateStatus(clientMsgId, status);
+  }
+
+  Future<void> markMyMessagesAsRead(int groupId, int peerId) async {
+    try {
+      final db = await _open();
+
+      // 내가 보낸 메시지 중 해당 방의 메시지를 읽음 처리
+      await db.update(
+        'messages',
+        {'status': 'read'},
+        where: 'group_id = ? AND peer_id = ? AND is_mine = 1 AND status != ?',
+        whereArgs: [groupId, peerId, 'read'],
+      );
+
+      // 스트림으로 방출하여 UI가 새로고침 되도록 유도
+      final rows = await db.query(
+        'messages',
+        where: 'group_id = ? AND peer_id = ? AND is_mine = 1 AND status = ?',
+        whereArgs: [groupId, peerId, 'read'],
+      );
+
+      for (final row in rows) {
+        _messageStreamController.add(StoredMessage.fromMap(row));
+      }
+    } catch (e, st) {
+      debugPrint('LocalChatDb markMyMessagesAsRead error: $e\n$st');
+    }
+  }
+
+  Future<List<StoredMessage>> loadMessages(
+    int groupId,
+    int peerId, {
+    int limit = 200,
+  }) async {
     try {
       final db = await _open();
       final rows = await db.query(
         'messages',
-        where: 'peer_id = ?',
-        whereArgs: [peerId],
+        where: 'group_id = ? AND peer_id = ?',
+        whereArgs: [groupId, peerId],
         orderBy: 'sent_at ASC',
         limit: limit,
       );
@@ -343,6 +561,74 @@ class LocalChatDb {
       );
     } catch (e, st) {
       debugPrint('LocalChatDb deleteMessage error: $e\n$st');
+    }
+  }
+
+  Future<void> markMessageAsDeleted(String clientMsgId) async {
+    try {
+      final db = await _open();
+
+      final targetRows = await db.query(
+        'messages',
+        where: 'client_msg_id = ?',
+        whereArgs: [clientMsgId],
+        limit: 1,
+      );
+      if (targetRows.isEmpty) return;
+      final targetMsg = StoredMessage.fromMap(targetRows.first);
+
+      await db.update(
+        'messages',
+        {'is_deleted': 1},
+        where: 'client_msg_id = ?',
+        whereArgs: [clientMsgId],
+      );
+
+      final latestMsgRows = await db.query(
+        'messages',
+        where: 'group_id = ? AND peer_id = ?',
+        orderBy: 'sent_at DESC',
+        limit: 1,
+      );
+
+      if (latestMsgRows.isNotEmpty &&
+          latestMsgRows.first['client_msg_id'] == clientMsgId) {
+        await db.update(
+          'conversations',
+          {'last_message': '삭제된 메시지입니다.'},
+          where: 'group_id = ? AND peer_id = ?',
+          whereArgs: [targetMsg.groupId, targetMsg.peerId],
+        );
+      }
+
+      final updatedRows = await db.query(
+        'messages',
+        where: 'client_msg_id = ?',
+        whereArgs: [clientMsgId],
+        limit: 1,
+      );
+      if (updatedRows.isNotEmpty) {
+        _messageStreamController.add(StoredMessage.fromMap(updatedRows.first));
+      }
+    } catch (e, st) {
+      debugPrint('LocalChatDb markMessageAsDeleted error: $e\n$st');
+    }
+  }
+
+  Future<void> exitConversation(int groupId, int peerId) async {
+    try {
+      final db = await _open();
+      await db.update(
+        'conversations',
+        {
+          'is_exited': 1, // 나감 처리
+          'unread_count': 0, // 안읽은 메시지수 초기화
+        },
+        where: 'group_id = ? AND peer_id = ?',
+        whereArgs: [groupId, peerId],
+      );
+    } catch (e, st) {
+      debugPrint('LocalChatDb exitConversation error: $e\n$st');
     }
   }
 

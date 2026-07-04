@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutterproject/services/local_chat_db.dart';
 import 'Group_Detail_Screen.dart';
 import 'Group_Search_Screen.dart';
 import 'Personal_Chat_Screen.dart';
@@ -14,6 +15,7 @@ const String currentUserName = '연승혁';
 // ------------------------------------------------------------------
 
 class ChatItem {
+  final int groupId;
   final int peerId;
   final String name;
   String lastMessage;
@@ -23,6 +25,7 @@ class ChatItem {
   List<Map<String, dynamic>> messages;
 
   ChatItem({
+    required this.groupId,
     required this.peerId,
     required this.name,
     required this.lastMessage,
@@ -107,7 +110,54 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
     if (id == null) return;
 
     try {
-      final items = await ApiService.getChatInbox(id);
+      // 1. 서버 REST API 연동 (백그라운드 동기화)
+      final serverInbox = await ApiService.getChatInbox(id);
+
+      // 2. 받아온 스냅샷을 대화방 메타데이터 테이블에 직접 배치 업데이트
+      if (serverInbox.isNotEmpty) {
+        final List<Map<String, dynamic>> syncList = [];
+
+        for (final item in serverInbox) {
+          final peerId = item['peer_id'] as int;
+          final peerNickname = item['peer_nickname'] as String? ?? '';
+          final groupId =
+              int.tryParse(item['group_id']?.toString() ?? '0') ?? 0;
+          final lastMsg = (item['last_message'] as String?) ?? '';
+          final lastMsgAtStr = item['last_message_at'] as String?;
+          final lastMsgAt = lastMsgAtStr != null && lastMsgAtStr.isNotEmpty
+              ? DateTime.tryParse(lastMsgAtStr)?.toUtc().toIso8601String() ??
+                    DateTime.now().toUtc().toIso8601String()
+              : DateTime.now().toUtc().toIso8601String();
+          final unreadCount = item['unread_count'] as int? ?? 0;
+
+          syncList.add({
+            'group_id': groupId,
+            'peer_id': peerId,
+            'peer_nickname': peerNickname,
+            'last_message': lastMsg,
+            'last_message_at': lastMsgAt,
+            'unread_count': unreadCount,
+          });
+        }
+
+        // 대화방 메타데이터 직접 갱신 메서드 실행
+        await LocalChatDb.instance.syncConversationsBatch(syncList);
+      }
+
+      // 3. 로컬 DB에서 다시 로드하여 렌더링
+      final convs = await LocalChatDb.instance.listConversations();
+      final items = convs
+          .map(
+            (c) => {
+              'group_id': c.groupId,
+              'peer_id': c.peerId,
+              'peer_nickname': c.peerNickname,
+              'last_message': c.lastMessage,
+              'last_message_at': c.lastMessageAt?.toIso8601String() ?? '',
+              'unread_count': c.unreadCount,
+            },
+          )
+          .toList();
 
       // 시간 역순 정렬
       items.sort((a, b) {
@@ -128,7 +178,7 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
         });
       }
     } catch (e) {
-      debugPrint('인박스 폴링 실패: $e');
+      debugPrint('인박스 백그라운드 동기화 실패: $e');
     }
   }
 
@@ -223,14 +273,21 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
   void _updateChatItemFromResult(
     int peerId,
     String userName,
-    Map<String, dynamic> chatData,
+    Map<String, dynamic>? chatData,
   ) {
-    // 🌟 [추가] 모임 상세 화면에서 넘어온 데이터에 '방 나감' 꼬리표가 있다면?
+    if (chatData == null || chatData.isEmpty) {
+      _pollInbox();
+      return;
+    }
+    final int groupId = chatData['group_id'] ?? chatData['groupId'] ?? 0;
+
+    // 모임 상세 화면에서 넘어온 데이터에 '방 나감' 꼬리표가 있다면?
     if (chatData['didLeaveChat'] == true) {
+      LocalChatDb.instance.exitConversation(groupId, peerId);
       setState(() {
-        _chatItems.removeWhere((item) => item.name == userName); // 싹둑 잘라냅니다.
+        _chatItems.removeWhere((item) => item.name == userName);
       });
-      return; // 지웠으니 더 이상 업데이트 할 필요 없음! (함수 종료)
+      return; // 지웠으니 더 이상 업데이트 할 필요 없음!
     }
 
     final index = _chatItems.indexWhere((item) => item.name == userName);
@@ -269,6 +326,7 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
       } else {
         _chatItems.add(
           ChatItem(
+            groupId: groupId,
             peerId: peerId,
             name: userName,
             lastMessage: updatedLastMessage,
@@ -295,12 +353,14 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
   ) async {
     // 채팅방을 여는 순간 읽음 처리
     _markChatAsReadByName(chat.name);
+    await LocalChatDb.instance.markRead(chat.groupId, chat.peerId);
     Navigator.pop(bottomSheetContext); // 바텀시트 닫기
 
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => PersonalChatScreen(
+          groupId: chat.groupId,
           userName: chat.name,
           peerId: chat.peerId,
           initialMessages: chat.messages,
@@ -310,9 +370,13 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
 
     if (result != null && result is Map<String, dynamic>) {
       if (result['didLeaveChat'] == true) {
+        await LocalChatDb.instance.exitConversation(chat.groupId, chat.peerId);
         setState(() {
           // 쪽지 목록에서 날려버림!
-          _chatItems.removeWhere((item) => item.name == chat.name);
+          _chatItems.removeWhere(
+            (item) =>
+                item.groupId == chat.groupId && item.peerId == chat.peerId,
+          );
         });
         ScaffoldMessenger.of(
           context,
@@ -323,9 +387,7 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
         _updateChatItemFromResult(chat.peerId, chat.name, result);
       }
     } else {
-      setState(() {
-        _sortChatItemsByLatest();
-      });
+      _pollInbox();
     }
   }
 
@@ -418,10 +480,8 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
   // 쪽지 알림 바텀시트
   // ------------------------------------------------------------------
   void _showChatBottomSheet() {
-    // \ud3f4\ub9c1\uc73c\ub85c \uc774\ubbf8 \ucd5c\uc2e0\ud654\ub41c _inboxItems \uad6c\ub3c0 unread \uc788\ub294 \ud56d\ubaa9\ub9cc \ud45c\uc2dc
-    final unreadInbox = _inboxItems
-        .where((item) => ((item['unread_count'] as int?) ?? 0) > 0)
-        .toList();
+    // 모든방이 표시되도록 합니다.
+    final inboxList = _inboxItems;
 
     showModalBottomSheet(
       context: context,
@@ -435,22 +495,27 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
             children: [
               const SizedBox(height: 16),
               const Text(
-                '\ucabd\uc9c0',
+                '쪽지',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const Divider(),
               Expanded(
-                child: unreadInbox.isEmpty
+                child: inboxList.isEmpty
                     ? const Center(
                         child: Text(
-                          '\uc0c8\ub85c\uc6b4 \ucabd\uc9c0\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.',
+                          '대화 중인 쪽지방이 없습니다.',
                           style: TextStyle(fontSize: 16),
                         ),
                       )
                     : ListView.builder(
-                        itemCount: unreadInbox.length,
+                        itemCount: inboxList.length,
                         itemBuilder: (context, index) {
-                          final item = unreadInbox[index];
+                          final item = inboxList[index];
+                          final currentGroupId =
+                              int.tryParse(
+                                item['group_id']?.toString() ?? '0',
+                              ) ??
+                              0;
                           final peerId = item['peer_id'] as int;
                           final peerNickname =
                               (item['peer_nickname'] as String?) ?? '';
@@ -458,6 +523,17 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
                               (item['last_message'] as String?) ?? '';
                           final unreadCount =
                               (item['unread_count'] as int?) ?? 0;
+
+                          String groupName = '일반 쪽지방';
+                          try {
+                            // _myGroups의 id 모델 규격(String)과 매칭을 시도합니다.
+                            final targetGroup = _myGroups.firstWhere(
+                              (g) => g.id == currentGroupId.toString(),
+                            );
+                            groupName = targetGroup.name;
+                          } catch (_) {
+                            groupName = '이전 대화방';
+                          }
 
                           return ListTile(
                             leading: CircleAvatar(
@@ -468,7 +544,7 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
                               ),
                             ),
                             title: Text(
-                              peerNickname,
+                              '[$groupName] $peerNickname',
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                               ),
@@ -482,36 +558,40 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
                                 color: Colors.black87,
                               ),
                             ),
-                            trailing: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.red,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                '$unreadCount',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
+                            // 안 읽은 메시지가 있을 때만 빨간색 배지를 표시
+                            trailing: unreadCount > 0
+                                ? Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      '$unreadCount',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  )
+                                : const SizedBox.shrink(), // 0개일 때는 투명 처리
                             onTap: () async {
                               Navigator.pop(bottomSheetContext);
                               await Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => PersonalChatScreen(
+                                    groupId: currentGroupId,
                                     userName: peerNickname,
                                     peerId: peerId,
                                   ),
                                 ),
                               );
-                              // \ucabd\uc9c0 \uc77d\uace0 \ub098\uba74 \uc989\uc2dc \ud3f4\ub9c1\ud558\uc5ec \ubc30\uc9c0 \uac31\uc2e0
+                              // 쪽지 읽고 나면 즉시 폴링하여 배지 갱신
                               await _pollInbox();
                             },
                           );
@@ -553,6 +633,7 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
                 onChatDataChanged: (userName, chatData) {
                   final int currentPeerId =
                       chatData['peer_id'] ?? chatData['peerId'] ?? 0;
+                  chatData['group_id'] = int.tryParse(group.id) ?? 0;
                   _updateChatItemFromResult(currentPeerId, userName, chatData);
                 },
               ),
