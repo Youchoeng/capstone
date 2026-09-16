@@ -1,7 +1,7 @@
 import os
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlmodel import Session, select
+from sqlmodel import Session, select, delete
 from database import get_session
 from models.post import Post, Comment, PostLike, CommentLike
 from models.user import User
@@ -237,8 +237,12 @@ def delete_post(
     if post.author_internal_id != current_user.internal_id:
         raise HTTPException(status_code=403, detail="본인 게시글만 삭제할 수 있습니다.")
 
-    post.is_deleted = True
-    session.add(post)
+    # 연관 데이터 삭제
+    session.exec(delete(PostLike).where(PostLike.post_id == post_id))
+    session.exec(delete(Comment).where(Comment.post_id == post_id))
+    session.exec(delete(Report).where(Report.target_type == "post", Report.target_id == post_id))
+    
+    session.delete(post)
     session.commit()
     return {"message": "게시글 삭제 완료"}
 
