@@ -62,6 +62,7 @@ class GroupDialogs {
     final TextEditingController contentController = TextEditingController();
     File? selectedImage;
     bool isNotice = false; // 🌟 [추가] 공지사항 체크 여부 (기본은 false)
+    bool isUploading = false;
 
     showGeneralDialog(
       context: context,
@@ -83,23 +84,43 @@ class GroupDialogs {
               onImagePicked: (file) =>
                   setDialogState(() => selectedImage = file),
               onImageRemoved: () => setDialogState(() => selectedImage = null),
-              onSubmitted: () {
+              onSubmitted: isUploading ? null : () async {
                 if (contentController.text.trim().isNotEmpty ||
                     selectedImage != null) {
-                  onSubmitted(
+                  setDialogState(() => isUploading = true);
+                  
+                  // 여기서 바로 GroupPost를 생성해 반환하도록 onSubmitted에 넘깁니다.
+                  // Group_Detail_Screen.dart에서 업로드 로직을 처리하도록 수정할 수 있으나,
+                  // onSubmitted에 selectedImage도 넘겨주는게 더 깔끔합니다.
+                  // 이미 onSubmitted가 GroupPost를 받도록 되어있습니다.
+                  // Group_Detail_Screen에서 업로드를 하도록 onSubmitted를 변경해야 하므로
+                  // 여기서는 GroupPost 객체 대신 File? selectedImage까지 같이 묶어주거나
+                  // 그냥 imageUrl 에 selectedImage.path 를 담아 보낸 뒤 그쪽에서 File(imageUrl)로 업로드 처리하면 됩니다.
+                  
+                  await onSubmitted(
                     GroupPost(
+                      id: 0, // 임시
+                      title: '새 글', // 임시 (모임 상세에서 제목 입력 추가 필요 시 수정)
                       author: userName,
                       content: contentController.text.trim(),
                       timeAgo: '방금 전',
                       isPrivate: true,
-                      imageUrl: selectedImage?.path,
-                      isNotice: isNotice, // 🌟 [추가] 새 글 만들 때 공지사항 여부 쾅 찍어주기!
+                      imageUrl: selectedImage?.path, // 이거로 File 객체를 찾을 예정
+                      isNotice: isNotice,
+                      likeCount: 0,
+                      isLiked: false,
+                      comments: [],
                     ),
                   );
-                  Navigator.pop(context);
+                  
+                  if (context.mounted) {
+                    setDialogState(() => isUploading = false);
+                    Navigator.pop(context);
+                  }
                 }
               },
               submitLabel: '등록',
+              isUploading: isUploading,
             );
           },
         );
@@ -118,8 +139,9 @@ class GroupDialogs {
     required Function(bool?) onNoticeChanged, // 🌟 [추가] 체크박스 동작 함수
     required Function(File) onImagePicked,
     required VoidCallback onImageRemoved,
-    required VoidCallback onSubmitted,
+    required VoidCallback? onSubmitted,
     required String submitLabel,
+    bool isUploading = false,
   }) {
     return Scaffold(
       backgroundColor: Colors.black.withValues(alpha: 0.5),
@@ -252,10 +274,16 @@ class GroupDialogs {
                           vertical: 12,
                         ),
                       ),
-                      child: Text(
-                        submitLabel,
-                        style: const TextStyle(color: Colors.white),
-                      ),
+                      child: isUploading 
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            )
+                          : Text(
+                              submitLabel,
+                              style: const TextStyle(color: Colors.white),
+                            ),
                     ),
                   ],
                 ),

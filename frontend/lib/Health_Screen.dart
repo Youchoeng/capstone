@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 class HealthScreen extends StatefulWidget {
   const HealthScreen({super.key});
@@ -17,6 +18,60 @@ class _HealthScreenState extends State<HealthScreen> {
 
   // 🌟 핵심 추가 포인트: 질환 선택창을 접고 펼치는 스위치! (처음엔 무조건 펼쳐둠)
   bool _isDiseaseExpanded = true;
+
+  // 음성 인식 관련 변수 추가
+  final stt.SpeechToText _speechToText = stt.SpeechToText();
+  bool _isListening = false;
+  String _sttText = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _initSpeech();
+  }
+
+  void _initSpeech() async {
+    await _speechToText.initialize();
+  }
+
+  void _listen() async {
+    if (!_isListening) {
+      bool available = await _speechToText.initialize(
+        onStatus: (val) {
+          if (val == 'done' || val == 'notListening') {
+            setState(() => _isListening = false);
+          }
+        },
+        onError: (val) => setState(() => _isListening = false),
+      );
+      if (available) {
+        setState(() => _isListening = true);
+        _speechToText.listen(
+          onResult: (val) {
+            setState(() {
+              _sttText = val.recognizedWords;
+              // 기존 텍스트(선택적)에 덮어씌우거나 새로 입력
+              _foodController.text = _sttText;
+              // 커서를 맨 끝으로 이동
+              _foodController.selection = TextSelection.fromPosition(
+                TextPosition(offset: _foodController.text.length),
+              );
+            });
+          },
+          localeId: 'ko_KR', // 한국어 설정
+        );
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('마이크 권한을 허용해 주세요.')),
+          );
+        }
+      }
+    } else {
+      setState(() => _isListening = false);
+      _speechToText.stop();
+    }
+  }
 
   void _analyzeFood() async {
     if (_foodController.text.isEmpty) return;
@@ -186,8 +241,12 @@ class _HealthScreenState extends State<HealthScreen> {
                         hintText: '예: 김치찌개, 단팥빵',
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         suffixIcon: IconButton(
-                          icon: const Icon(Icons.mic, color: Colors.blue, size: 28),
-                          onPressed: () {},
+                          icon: Icon(
+                            _isListening ? Icons.mic : Icons.mic_none,
+                            color: _isListening ? Colors.redAccent : Colors.blue,
+                            size: 28,
+                          ),
+                          onPressed: _listen,
                         ),
                       ),
                     ),

@@ -4,3 +4,4 @@ from .step_record import StepRecord
 from .medication_schedule import MedicationSchedule
 from .chat import ChatMessage, ChatRoomEvent
 from .group import Group, GroupMember, JoinRequest
+from .report import Report

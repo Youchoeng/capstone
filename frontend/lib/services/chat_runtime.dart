@@ -16,6 +16,7 @@
 import 'chat_socket.dart';
 import 'fcm_handler.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutterproject/api_service.dart';
 
 class ChatRuntime {
@@ -68,17 +69,17 @@ class ChatRuntime {
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         await ApiService.registerFcmToken(myUserId, token);
-        print("📲 [ChatRuntime] FCM 토큰 백엔드 동기화 성공");
+        debugPrint("📲 [ChatRuntime] FCM 토큰 백엔드 동기화 성공");
       }
       FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
         ApiService.registerFcmToken(myUserId, newToken);
-        print("🔄 [ChatRuntime] FCM 토큰 갱신 및 백엔드 동기화 성공");
+        debugPrint("🔄 [ChatRuntime] FCM 토큰 갱신 및 백엔드 동기화 성공");
       });
     } catch (e) {
-      print("⚠️ [ChatRuntime] FCM 토큰 동기화 실패: $e");
+      debugPrint("⚠️ [ChatRuntime] FCM 토큰 동기화 실패: $e");
     }
 
-    print("👤 [ChatRuntime] 유저 $myUserId 세션으로 런타임(FCM+WS)이 정상 기동되었습니다.");
+    debugPrint("👤 [ChatRuntime] 유저 $myUserId 세션으로 런타임(FCM+WS)이 정상 기동되었습니다.");
   }
 
   /// 채팅 UI 화면 진입 시 호출 — 이미 전역 소켓이 유지되므로 연결만 확인

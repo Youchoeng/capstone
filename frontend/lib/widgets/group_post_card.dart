@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../api_service.dart';
 import '../Group_Model.dart'; // 모델 경로 확인
 import 'common_widget.dart';
 
@@ -77,6 +78,11 @@ class GroupPostCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
 
+              if (post.title.isNotEmpty) ...[
+                Text(post.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+              ],
+
               // 2. 본문 텍스트
               _buildPostText(post.content),
               const SizedBox(height: 12),
@@ -126,23 +132,28 @@ class GroupPostCard extends StatelessWidget {
 
   // 3. 게시글 이미지 (파일/네트워크 구분)
   Widget _buildPostImage(String path) {
+    // 상대 경로인 경우 절대 URL로 변환 시도
+    final resolvedUrl = ApiService.getImageUrl(path);
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: path.startsWith('http')
+      child: resolvedUrl != null
           ? Image.network(
-        path,
-        width: double.infinity,
-        height: 150,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => Container(
-          height: 150, color: Colors.grey[300], child: const Icon(Icons.broken_image),
-        ),
-      )
+              resolvedUrl,
+              width: double.infinity,
+              height: 150,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => Container(
+                height: 150,
+                color: Colors.grey[300],
+                child: const Icon(Icons.broken_image),
+              ),
+            )
           : Image.file(
-        File(path),
-        width: double.infinity,
-        height: 150,
-        fit: BoxFit.cover,
+              File(path),
+              width: double.infinity,
+              height: 150,
+              fit: BoxFit.cover,
       ),
     );
   }

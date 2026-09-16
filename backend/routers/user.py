@@ -27,6 +27,17 @@ def get_current_user(
         raise HTTPException(status_code=404, detail="유저를 찾을 수 없습니다.")
     return user
 
+def get_current_user_optional(
+    token: str = Depends(OAuth2PasswordBearer(tokenUrl="/users/login", auto_error=False)),
+    session: Session = Depends(get_session)
+) -> User | None:
+    if not token:
+        return None
+    user_id = decode_token(token)
+    if not user_id:
+        return None
+    user = session.exec(select(User).where(User.user_id == user_id)).first()
+    return user
 
 # ── 회원가입 ───────────────────────────────────────────────────
 @router.post("/register", status_code=201)

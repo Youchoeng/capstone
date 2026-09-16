@@ -223,7 +223,7 @@ class _HomeSettingsScreenState extends State<HomeSettingsScreen> {
 
           // 로그아웃 메뉴
           Card(
-            margin: const EdgeInsets.only(top: 12, bottom: 24),
+            margin: const EdgeInsets.only(top: 12, bottom: 12),
             color: Colors.red[50],
             child: ListTile(
               leading: Icon(
@@ -248,13 +248,85 @@ class _HomeSettingsScreenState extends State<HomeSettingsScreen> {
                 // 2. ApiService에 등록된 로컬 SharedPreferences 저장소 비우기
                 await ApiService.logout();
 
-                if (!mounted) return;
+                if (!context.mounted) return;
 
                 // 3. 로그인 화면으로 안전하게 튕겨내기
                 Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(builder: (context) => const LoginScreen()),
                   (route) => false, // 기존 내비게이션 스택 전부 제거
+                );
+              },
+            ),
+          ),
+
+          // 회원 탈퇴 메뉴
+          Card(
+            margin: const EdgeInsets.only(bottom: 24),
+            color: Colors.red[100],
+            child: ListTile(
+              leading: Icon(
+                Icons.delete_forever,
+                size: 30,
+                color: Colors.red[900],
+              ),
+              title: Text(
+                '회원 탈퇴',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.red[900],
+                ),
+              ),
+              subtitle: const Text('모든 데이터가 영구적으로 삭제됩니다.'),
+              trailing: Icon(Icons.chevron_right, color: Colors.red[900]),
+              onTap: () {
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text(
+                      '정말 탈퇴하시겠습니까?',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    content: const Text(
+                      '탈퇴 시 작성한 게시글, 쪽지 내역 및 건강 기록이 영구적으로 삭제되며 복구할 수 없습니다.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('취소'),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          final error = await ApiService.deleteAccount();
+                          if (error == null) {
+                            await ChatRuntime.instance.stop();
+                            if (!context.mounted) return;
+                            Navigator.pushAndRemoveUntil(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const LoginScreen(),
+                              ),
+                              (route) => false,
+                            );
+                          } else {
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(
+                              context,
+                            ).showSnackBar(SnackBar(content: Text(error)));
+                          }
+                        },
+                        child: const Text(
+                          '탈퇴하기',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 );
               },
             ),

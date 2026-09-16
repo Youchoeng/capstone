@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'api_service.dart';
 
 // ------------------------------------------------------------------
@@ -27,7 +29,9 @@ class Comment {
       author: json['author'] ?? '',
       content: json['content'] ?? '',
       likesCount: json['likes_count'] ?? 0,
-      replies: (json['replies'] as List<dynamic>?)
+      isLiked: json['is_liked'] ?? false,
+      replies:
+          (json['replies'] as List<dynamic>?)
               ?.map((r) => Comment.fromJson(r))
               .toList() ??
           [],
@@ -44,6 +48,7 @@ class Post {
   bool isLiked;
   List<Comment> comments;
   String timeAgo;
+  String? imageUrl;
 
   Post({
     this.id = 0,
@@ -54,6 +59,7 @@ class Post {
     this.isLiked = false,
     List<Comment>? comments,
     required this.timeAgo,
+    this.imageUrl,
   }) : comments = comments ?? [];
 
   factory Post.fromJson(Map<String, dynamic> json) {
@@ -63,11 +69,14 @@ class Post {
       content: json['content'] ?? '',
       author: json['author'] ?? '',
       likesCount: json['likes_count'] ?? 0,
-      comments: (json['comments'] as List<dynamic>?)
+      isLiked: json['is_liked'] ?? false,
+      comments:
+          (json['comments'] as List<dynamic>?)
               ?.map((c) => Comment.fromJson(c))
               .toList() ??
           [],
       timeAgo: _formatTimeAgo(json['created_at']),
+      imageUrl: json['attachment_url'],
     );
   }
 
@@ -153,6 +162,8 @@ class _SudaScreenState extends State<SudaScreen> {
     final TextEditingController titleController = TextEditingController();
     final TextEditingController contentController = TextEditingController();
     bool isAnonymousPost = true;
+    File? selectedImage;
+    bool isUploading = false;
 
     showDialog(
       context: context,
@@ -186,51 +197,128 @@ class _SudaScreenState extends State<SudaScreen> {
                     ),
                     TextField(
                       controller: titleController,
-                      decoration: const InputDecoration(
-                        hintText: '제목을 입력하세요',
-                      ),
+                      decoration: const InputDecoration(hintText: '제목을 입력하세요'),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: contentController,
                       maxLines: 5,
-                      decoration: const InputDecoration(
-                        hintText: '내용을 입력하세요',
+                      decoration: const InputDecoration(hintText: '내용을 입력하세요'),
+                    ),
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: IconButton(
+                        icon: const Icon(Icons.image, color: Colors.blue),
+                        onPressed: () async {
+                          final picker = ImagePicker();
+                          final pickedFile = await picker.pickImage(
+                            source: ImageSource.gallery,
+                          );
+                          if (pickedFile != null) {
+                            setDialogState(() {
+                              selectedImage = File(pickedFile.path);
+                            });
+                          }
+                        },
                       ),
                     ),
+                    if (selectedImage != null)
+                      Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(
+                              selectedImage!,
+                              height: 100,
+                              width: 100,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            child: GestureDetector(
+                              onTap: () {
+                                setDialogState(() {
+                                  selectedImage = null;
+                                });
+                              },
+                              child: Container(
+                                color: Colors.black54,
+                                child: const Icon(
+                                  Icons.close,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: isUploading ? null : () => Navigator.pop(context),
                   child: const Text('취소', style: TextStyle(color: Colors.grey)),
                 ),
                 ElevatedButton(
-                  onPressed: () async {
-                    if (titleController.text.trim().isNotEmpty &&
-                        contentController.text.trim().isNotEmpty) {
-                      Navigator.pop(context);
-                      final postId = await ApiService.createPost(
-                        title: titleController.text.trim(),
-                        content: contentController.text.trim(),
-                        isAnonymous: isAnonymousPost,
-                      );
-                      if (postId != null) {
-                        await _loadPosts();
-                      } else {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('게시글 작성에 실패했습니다.')),
-                          );
-                        }
-                      }
-                    }
-                  },
+                  onPressed: isUploading
+                      ? null
+                      : () async {
+                          if (titleController.text.trim().isNotEmpty &&
+                              contentController.text.trim().isNotEmpty) {
+                            setDialogState(() {
+                              isUploading = true;
+                            });
+
+                            String? uploadedUrl;
+                            if (selectedImage != null) {
+                              uploadedUrl = await ApiService.uploadPostImage(
+                                selectedImage!,
+                              );
+                            }
+
+                            final postId = await ApiService.createPost(
+                              title: titleController.text.trim(),
+                              content: contentController.text.trim(),
+                              isAnonymous: isAnonymousPost,
+                              attachmentUrl: uploadedUrl,
+                            );
+
+                            setDialogState(() {
+                              isUploading = false;
+                            });
+
+                            if (!context.mounted) return;
+                            Navigator.pop(context);
+
+                            if (postId != null) {
+                              await _loadPosts();
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('게시글 작성에 실패했습니다.'),
+                                ),
+                              );
+                            }
+                          }
+                        },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue[600],
                   ),
-                  child: const Text('등록', style: TextStyle(color: Colors.white)),
+                  child: isUploading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text('등록', style: TextStyle(color: Colors.white)),
                 ),
               ],
             );
@@ -278,6 +366,20 @@ class _SudaScreenState extends State<SudaScreen> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
+            if (post.imageUrl != null && post.imageUrl!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8.0),
+                child: Image.network(
+                  ApiService.getImageUrl(post.imageUrl) ?? post.imageUrl!,
+                  width: double.infinity,
+                  height: 150,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) =>
+                      const SizedBox.shrink(),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Row(
               children: [
@@ -469,7 +571,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('게시글 수정', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          '게시글 수정',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -498,7 +603,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('취소', style: TextStyle(fontSize: 16, color: Colors.grey)),
+            child: const Text(
+              '취소',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[600]),
@@ -517,7 +625,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 }
               }
             },
-            child: const Text('저장', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
+            child: const Text(
+              '저장',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
@@ -529,7 +644,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('게시글 삭제', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          '게시글 삭제',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: const Text(
           '정말 이 게시글을 삭제하시겠습니까?\n삭제된 글은 복구할 수 없습니다.',
           style: TextStyle(fontSize: 18),
@@ -537,19 +655,29 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('취소', style: TextStyle(fontSize: 16, color: Colors.grey)),
+            child: const Text(
+              '취소',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
               Navigator.pop(context);
               final ok = await ApiService.deletePost(widget.postId);
-              if (ok && mounted) {
+              if (ok && context.mounted) {
                 widget.onDelete();
                 Navigator.pop(context);
               }
             },
-            child: const Text('삭제', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
+            child: const Text(
+              '삭제',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
@@ -564,7 +692,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('댓글 수정', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          '댓글 수정',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: TextField(
           controller: editController,
           maxLines: 4,
@@ -577,7 +708,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('취소', style: TextStyle(fontSize: 16, color: Colors.grey)),
+            child: const Text(
+              '취소',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[600]),
@@ -592,7 +726,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 if (ok) await _loadDetail();
               }
             },
-            child: const Text('저장', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
+            child: const Text(
+              '저장',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
@@ -604,24 +745,88 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('댓글 삭제', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text('정말 이 댓글을 삭제하시겠습니까?', style: TextStyle(fontSize: 18)),
+        title: const Text(
+          '댓글 삭제',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          '정말 이 댓글을 삭제하시겠습니까?',
+          style: TextStyle(fontSize: 18),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('취소', style: TextStyle(fontSize: 16, color: Colors.grey)),
+            child: const Text(
+              '취소',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
               Navigator.pop(context);
-              final ok = await ApiService.deleteComment(widget.postId, comment.id);
+              final ok = await ApiService.deleteComment(
+                widget.postId,
+                comment.id,
+              );
               if (ok) await _loadDetail();
             },
-            child: const Text('삭제', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
+            child: const Text(
+              '삭제',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  void _showReportDialog({required bool isPost, required int targetId}) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        final reasons = ['스팸 및 홍보', '욕설 및 비하', '음란물 및 부적절한 콘텐츠', '도배', '기타'];
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  '신고 사유 선택',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ...reasons.map(
+                (reason) => ListTile(
+                  title: Text(reason),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final errorMsg = isPost
+                        ? await ApiService.reportPost(targetId, reason)
+                        : await ApiService.reportComment(
+                            widget.postId,
+                            targetId,
+                            reason,
+                          );
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(errorMsg ?? '신고가 접수되었습니다.')),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -650,7 +855,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           });
                         },
                       ),
-                      const Text('익명', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      const Text(
+                        '익명',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ],
                   ),
                   TextField(
@@ -735,13 +946,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Widget _buildReply(Comment parentComment, Comment reply) {
     final mine = _isMine(reply.author);
     return Padding(
-      padding: const EdgeInsets.only(left: 52.0, right: 12.0, top: 6.0, bottom: 6.0),
+      padding: const EdgeInsets.only(
+        left: 52.0,
+        right: 12.0,
+        top: 6.0,
+        bottom: 6.0,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Padding(
             padding: EdgeInsets.only(top: 2.0),
-            child: Text('ㄴ ', style: TextStyle(fontSize: 18, color: Colors.grey)),
+            child: Text(
+              'ㄴ ',
+              style: TextStyle(fontSize: 18, color: Colors.grey),
+            ),
           ),
           Expanded(
             child: Column(
@@ -762,19 +981,33 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     if (mine) ...[
                       _buildActionIcon(
                         icon: Icons.delete_outline,
-                        onTap: () => _showDeleteReplyDialog(parentComment, reply),
+                        onTap: () =>
+                            _showDeleteReplyDialog(parentComment, reply),
                         color: Colors.red,
                       ),
+                      const SizedBox(width: 4),
                     ],
+                    _buildActionIcon(
+                      icon: Icons.report_problem_outlined,
+                      onTap: () =>
+                          _showReportDialog(isPost: false, targetId: reply.id),
+                      color: Colors.orange,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 2),
-                Text(reply.content, style: const TextStyle(fontSize: 16, color: Colors.black)),
+                Text(
+                  reply.content,
+                  style: const TextStyle(fontSize: 16, color: Colors.black),
+                ),
                 const SizedBox(height: 4),
                 InkWell(
                   onTap: () async {
                     if (reply.isLiked) {
-                      final newCount = await ApiService.unlikeComment(widget.postId, reply.id);
+                      final newCount = await ApiService.unlikeComment(
+                        widget.postId,
+                        reply.id,
+                      );
                       if (newCount != null && mounted) {
                         setState(() {
                           reply.isLiked = false;
@@ -782,7 +1015,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         });
                       }
                     } else {
-                      final newCount = await ApiService.likeComment(widget.postId, reply.id);
+                      final newCount = await ApiService.likeComment(
+                        widget.postId,
+                        reply.id,
+                      );
                       if (newCount != null && mounted) {
                         setState(() {
                           reply.isLiked = true;
@@ -795,7 +1031,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        reply.isLiked ? Icons.thumb_up : Icons.thumb_up_alt_outlined,
+                        reply.isLiked
+                            ? Icons.thumb_up
+                            : Icons.thumb_up_alt_outlined,
                         size: 15,
                         color: Colors.red,
                       ),
@@ -823,7 +1061,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ListTile(
-            leading: Icon(Icons.person, color: mine ? Colors.blue : Colors.grey),
+            leading: Icon(
+              Icons.person,
+              color: mine ? Colors.blue : Colors.grey,
+            ),
             title: Row(
               children: [
                 Expanded(
@@ -848,21 +1089,34 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     onTap: () => _showDeleteCommentDialog(comment),
                     color: Colors.red,
                   ),
+                  const SizedBox(width: 4),
                 ],
+                _buildActionIcon(
+                  icon: Icons.report_problem_outlined,
+                  onTap: () =>
+                      _showReportDialog(isPost: false, targetId: comment.id),
+                  color: Colors.orange,
+                ),
               ],
             ),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 4),
-                Text(comment.content, style: const TextStyle(fontSize: 18, color: Colors.black)),
+                Text(
+                  comment.content,
+                  style: const TextStyle(fontSize: 18, color: Colors.black),
+                ),
                 const SizedBox(height: 6),
                 Row(
                   children: [
                     InkWell(
                       onTap: () async {
                         if (comment.isLiked) {
-                          final newCount = await ApiService.unlikeComment(widget.postId, comment.id);
+                          final newCount = await ApiService.unlikeComment(
+                            widget.postId,
+                            comment.id,
+                          );
                           if (newCount != null && mounted) {
                             setState(() {
                               comment.isLiked = false;
@@ -870,7 +1124,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             });
                           }
                         } else {
-                          final newCount = await ApiService.likeComment(widget.postId, comment.id);
+                          final newCount = await ApiService.likeComment(
+                            widget.postId,
+                            comment.id,
+                          );
                           if (newCount != null && mounted) {
                             setState(() {
                               comment.isLiked = true;
@@ -882,19 +1139,30 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       child: Row(
                         children: [
                           Icon(
-                            comment.isLiked ? Icons.thumb_up : Icons.thumb_up_alt_outlined,
+                            comment.isLiked
+                                ? Icons.thumb_up
+                                : Icons.thumb_up_alt_outlined,
                             size: 16,
                             color: Colors.red,
                           ),
                           const SizedBox(width: 4),
-                          Text('${comment.likesCount}', style: const TextStyle(color: Colors.red)),
+                          Text(
+                            '${comment.likesCount}',
+                            style: const TextStyle(color: Colors.red),
+                          ),
                         ],
                       ),
                     ),
                     const SizedBox(width: 16),
                     InkWell(
                       onTap: () => _showReplyDialog(comment),
-                      child: const Text('답글', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
+                      child: const Text(
+                        '답글',
+                        style: TextStyle(
+                          color: Colors.blue,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -926,10 +1194,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             '작성자: ${post.author}  |  ${post.timeAgo}',
             style: const TextStyle(color: Colors.grey),
           ),
-          if (mine) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              if (mine) ...[
                 TextButton.icon(
                   onPressed: _showEditPostDialog,
                   icon: const Icon(Icons.edit_outlined, size: 18),
@@ -943,11 +1211,32 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   style: TextButton.styleFrom(foregroundColor: Colors.red),
                 ),
               ],
-            ),
-          ],
+              TextButton.icon(
+                onPressed: () =>
+                    _showReportDialog(isPost: true, targetId: post.id),
+                icon: const Icon(Icons.report_problem_outlined, size: 18),
+                label: const Text('신고'),
+                style: TextButton.styleFrom(foregroundColor: Colors.orange),
+              ),
+            ],
+          ),
           const Divider(height: 30, thickness: 1),
           Text(post.content, style: const TextStyle(fontSize: 18, height: 1.5)),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+
+          if (post.imageUrl != null && post.imageUrl!.isNotEmpty) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                ApiService.getImageUrl(post.imageUrl) ?? post.imageUrl!,
+                width: double.infinity,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) =>
+                    const SizedBox.shrink(),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
           Center(
             child: OutlinedButton.icon(
               onPressed: () async {
@@ -980,7 +1269,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 style: const TextStyle(color: Colors.red, fontSize: 16),
               ),
               style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
+                ),
                 side: const BorderSide(color: Colors.red),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
@@ -1023,7 +1315,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         setState(() => _isAnonymous = value ?? true);
                       },
                     ),
-                    const Text('익명', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Text(
+                      '익명',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(width: 8),
@@ -1103,16 +1401,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     ),
                   ),
                   SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        final comment = _post!.comments[index];
-                        return Container(
-                          color: Colors.white,
-                          child: _buildComment(comment),
-                        );
-                      },
-                      childCount: _post!.comments.length,
-                    ),
+                    delegate: SliverChildBuilderDelegate((context, index) {
+                      final comment = _post!.comments[index];
+                      return Container(
+                        color: Colors.white,
+                        child: _buildComment(comment),
+                      );
+                    }, childCount: _post!.comments.length),
                   ),
                   const SliverToBoxAdapter(child: SizedBox(height: 24)),
                 ],

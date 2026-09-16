@@ -12,8 +12,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'firebase_options.dart';
+import 'Personal_Chat_Screen.dart';
 
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -33,8 +36,43 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    _checkInitialMessage();
+  }
+
+  Future<void> _checkInitialMessage() async {
+    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final data = initialMessage.data;
+        if (data.containsKey('group_id') && data.containsKey('sender_id')) {
+          final groupId = int.tryParse(data['group_id'].toString()) ?? 0;
+          final peerId = int.tryParse(data['sender_id'].toString()) ?? 0;
+          final userName = data['sender_nickname'] ?? '상대방';
+
+          navigatorKey.currentState?.push(
+            MaterialPageRoute(
+              builder: (_) => PersonalChatScreen(
+                groupId: groupId,
+                peerId: peerId,
+                userName: userName,
+              ),
+            ),
+          );
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +113,7 @@ class MyApp extends StatelessWidget {
               child: child!,
             );
           },
+          navigatorKey: navigatorKey,
           home: const LoginScreen(),
         );
       },

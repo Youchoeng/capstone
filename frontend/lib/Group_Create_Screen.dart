@@ -59,6 +59,7 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
 
     setState(() => _isSubmitting = false);
 
+    if (!mounted) return;
     if (groupId != null) {
       Navigator.pop(context, {
         'id': groupId,

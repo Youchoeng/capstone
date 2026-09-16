@@ -51,6 +51,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (me != null && me['internal_id'] != null) {
         await ChatRuntime.instance.start(myUserId: me['internal_id']);
       }
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(

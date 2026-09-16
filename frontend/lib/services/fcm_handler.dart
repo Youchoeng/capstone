@@ -26,10 +26,13 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 
+import '../main.dart'; // navigatorKey 참조
+import '../Personal_Chat_Screen.dart';
 import 'chat_runtime.dart';
 import 'local_chat_db.dart';
 
@@ -150,7 +153,23 @@ class FcmChatHandler {
     // 알림 탭으로 앱이 열린 경우 — 필요 시 채팅방으로 라우팅
     FirebaseMessaging.onMessageOpenedApp.listen((message) async {
       await _persistChatMessage(message);
-      // TODO: navigatorKey 를 통해 해당 채팅방으로 이동시키는 로직을 연결하세요.
+
+      final data = message.data;
+      if (data.containsKey('group_id') && data.containsKey('sender_id')) {
+        final groupId = int.tryParse(data['group_id'].toString()) ?? 0;
+        final peerId = int.tryParse(data['sender_id'].toString()) ?? 0;
+        final userName = data['sender_nickname'] ?? '상대방';
+
+        navigatorKey.currentState?.push(
+          MaterialPageRoute(
+            builder: (_) => PersonalChatScreen(
+              groupId: groupId,
+              peerId: peerId,
+              userName: userName,
+            ),
+          ),
+        );
+      }
     });
   }
 

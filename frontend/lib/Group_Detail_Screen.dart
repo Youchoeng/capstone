@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
 import 'dart:io';
+import 'package:flutter/material.dart';
+
 import 'package:image_picker/image_picker.dart';
 import 'Group_Post_Detail_Screen.dart';
 import 'Group_Model.dart';
@@ -101,8 +102,17 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     );
   }
 
-  void _deletePost(GroupPost post) {
-    setState(() => _posts.remove(post));
+  void _deletePost(GroupPost post) async {
+    final success = await ApiService.deletePost(post.id);
+    if (success) {
+      if (mounted) setState(() => _posts.remove(post));
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('게시글 삭제 실패')));
+      }
+    }
   }
 
   Future<void> _openLeaderJoinChat() async {
@@ -200,10 +210,10 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
     }
 
     _syncMembersAndChat();
-    _fetchRealMembers();
+    _fetchGroupData();
   }
 
-  Future<void> _fetchRealMembers() async {
+  Future<void> _fetchGroupData() async {
     try {
       final detail = await ApiService.getGroupDetail(
         int.parse(widget.group.id),
@@ -233,8 +243,15 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
           }
         });
       }
+
+      final posts = await ApiService.getGroupPosts(int.parse(widget.group.id));
+      if (posts != null && mounted) {
+        setState(() {
+          _posts = posts;
+        });
+      }
     } catch (e) {
-      debugPrint('Error fetching group members: $e');
+      debugPrint('Error fetching group data: $e');
     }
   }
 
@@ -338,6 +355,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
 
         // 메인 화면으로도 "이 사람 쪽지방 나갔어!" 하고 신호를 그대로 전달
         widget.onChatDataChanged?.call(member.name, result);
+        if (!mounted) return;
 
         ScaffoldMessenger.of(
           context,
@@ -568,10 +586,31 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
       context: context,
       userName: widget.userName,
       isLeader: widget.isLeader,
-      onSubmitted: (newPost) {
-        setState(() {
-          _posts.insert(0, newPost);
-        });
+      onSubmitted: (newPost) async {
+        String? uploadedUrl;
+        if (newPost.imageUrl != null && newPost.imageUrl!.isNotEmpty) {
+          uploadedUrl = await ApiService.uploadPostImage(
+            File(newPost.imageUrl!),
+          );
+        }
+
+        final postId = await ApiService.createGroupPost(
+          int.parse(widget.group.id),
+          title: newPost.title,
+          content: newPost.content,
+          isAnonymous: false,
+          attachmentUrl: uploadedUrl,
+        );
+
+        if (postId != null) {
+          await _fetchGroupData();
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('게시글 작성에 실패했습니다.')));
+          }
+        }
       },
     );
   }

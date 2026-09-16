@@ -21,6 +21,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
@@ -56,12 +57,12 @@ class ChatSocket {
     if (_disposed) return;
 
     if (_connected && _channel != null) {
-      print("이미 웹소켓이 연결되어 있어 중복 연결을 건너뜁니다.");
+      debugPrint("이미 웹소켓이 연결되어 있어 중복 연결을 건너뜁니다.");
       return;
     }
 
     if (_isConnecting) {
-      print("이미 웹소켓 연결이 진행 중이므로 중복 연결 시도를 건너뜁니다.");
+      debugPrint("이미 웹소켓 연결이 진행 중이므로 중복 연결 시도를 건너뜁니다.");
       return;
     }
 
@@ -100,7 +101,7 @@ class ChatSocket {
           final now = DateTime.now().millisecondsSinceEpoch;
 
           if (_lastPongTime != null && (now - _lastPongTime! > 35000)) {
-            print(
+            debugPrint(
               "❌ [소켓 모니터링] 35초간 서버로부터 Pong 응답이 없습니다. 좀비 세션으로 판단하여 강제 재연결을 시도합니다.",
             );
             _onDone();
@@ -124,7 +125,7 @@ class ChatSocket {
     if (_channel != null) {
       _channel!.sink.add(rawJson);
     } else {
-      print("⚠️ 웹소켓 채널이 비어있어 [sendRaw] 패킷을 전송하지 못했습니다.");
+      debugPrint("⚠️ 웹소켓 채널이 비어있어 [sendRaw] 패킷을 전송하지 못했습니다.");
     }
   }
 
@@ -185,13 +186,13 @@ class ChatSocket {
       case 'enter_room':
       case 'leave_room':
         // 클라가 서버로 보낸 패킷이 에코되어 돌아오는 경우 무시.
-        print(
+        debugPrint(
           "🚪 [수신부] 입장/퇴장 이벤트(${data['type']}) — 화면 표시 생략 (이벤트 전용 테이블에만 기록됨)",
         );
         break;
       case 'delete_message':
         final targetMsgId = data['client_msg_id'] as String?;
-        print("🗑️ [수신부] 상대방이 메시지 삭제 요청 전송: $targetMsgId");
+        debugPrint("🗑️ [수신부] 상대방이 메시지 삭제 요청 전송: $targetMsgId");
         if (targetMsgId != null && targetMsgId.isNotEmpty) {
           // 로컬 DB 수정 및 실시간 UI 스트림 전파 함수 호출
           await LocalChatDb.instance.markMessageAsDeleted(targetMsgId);
@@ -286,7 +287,7 @@ class ChatSocket {
         : int.tryParse(data['sender_id']?.toString() ?? '');
 
     if (rawSenderId == null) {
-      print("⚠️ [수신 오류] sender_id가 올바르지 않아 메시지를 무시합니다.");
+      debugPrint("⚠️ [수신 오류] sender_id가 올바르지 않아 메시지를 무시합니다.");
       return;
     }
     final int senderId = rawSenderId;
@@ -395,14 +396,14 @@ class ChatSocket {
           }),
         );
       } else {
-        print("⚠️ 웹소켓 연결이 원활하지 않아 서버에 삭제 패킷을 보내지 못했습니다.");
+        debugPrint("⚠️ 웹소켓 연결이 원활하지 않아 서버에 삭제 패킷을 보내지 못했습니다.");
       }
 
       // 서버 응답을 기다리지 않고 내 UI에 즉시 "삭제된 메시지입니다"를 띄우기 위해
       // 방금 우리가 만든 로컬 DB 업데이트 함수를 곧바로 실행합니다.
       LocalChatDb.instance.markMessageAsDeleted(clientMsgId);
     } catch (e) {
-      print("⚠️ 삭제 패킷 전송 중 에러 발생: $e");
+      debugPrint("⚠️ 삭제 패킷 전송 중 에러 발생: $e");
     }
   }
 

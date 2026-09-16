@@ -15,7 +15,7 @@ from schemas.post import (
     PostCreate, PostUpdate, PostResponse, PostDetailResponse,
     CommentCreate, CommentUpdate, CommentResponse,
 )
-from routers.user import get_current_user
+from routers.user import get_current_user, get_current_user_optional
 from crud.group import (
     create_group, get_group, list_all_groups, search_groups,
     get_my_groups, get_group_detail, is_member, is_leader,
@@ -236,10 +236,23 @@ def create_group_post(
 def get_group_posts(
     group_id: int,
     session: Session = Depends(get_session),
+    current_user: User | None = Depends(get_current_user_optional)
 ):
     posts = session.exec(
         select(Post).where(Post.group_id == group_id)
     ).all()
+
+    liked_post_ids = set()
+    if current_user and posts:
+        post_ids = [p.id for p in posts if p.id is not None]
+        if post_ids:
+            likes = session.exec(
+                select(PostLike.post_id).where(
+                    PostLike.user_internal_id == current_user.internal_id,
+                    PostLike.post_id.in_(post_ids)
+                )
+            ).all()
+            liked_post_ids = set(likes)
 
     result = []
     for post in posts:
@@ -249,6 +262,7 @@ def get_group_posts(
             title=post.title,
             author="익명" if post.is_anonymous else (author.nickname if author else "알 수 없음"),
             likes_count=post.likes_count,
+            is_liked=post.id in liked_post_ids,
             created_at=post.created_at,
             attachment_url=post.attachment_url,
         ))

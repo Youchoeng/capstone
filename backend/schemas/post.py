@@ -71,6 +71,7 @@ class CommentResponse(BaseModel):
     content: str
     author: str
     likes_count: int
+    is_liked: bool = False
     created_at: datetime
     replies: list["CommentResponse"] = []
 
@@ -80,6 +81,7 @@ class PostResponse(BaseModel):
     title: str
     author: str
     likes_count: int
+    is_liked: bool = False
     created_at: datetime
     attachment_url: Optional[str] = None
 
@@ -90,6 +92,11 @@ class PostDetailResponse(BaseModel):
     content: str
     author: str
     likes_count: int
+    is_liked: bool = False
     attachment_url: Optional[str] = None
     created_at: datetime
     comments: list[CommentResponse] = []
+
+class ReportCreate(BaseModel):
+    reason: str
+

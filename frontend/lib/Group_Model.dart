@@ -3,6 +3,7 @@
 // 1. 부모 댓글 (GroupComment)
 // ------------------------------------------------------------------
 class GroupComment {
+  int id;
   String author;
   String content;
   int likeCount;     // 승혁님 기존 기능 유지!
@@ -14,6 +15,7 @@ class GroupComment {
   List<GroupReply> replies;
 
   GroupComment({
+    this.id = 0,
     required this.author,
     required this.content,
     this.likeCount = 0,
@@ -22,10 +24,39 @@ class GroupComment {
     this.timeAgo = '방금 전',
     List<GroupReply>? replies,
   }) : replies = replies ?? [];
+
+  factory GroupComment.fromJson(Map<String, dynamic> json) {
+    return GroupComment(
+      id: json['id'] ?? 0,
+      author: json['author'] ?? '',
+      content: json['content'] ?? '',
+      likeCount: json['likes_count'] ?? 0,
+      isLiked: json['is_liked'] ?? false,
+      timeAgo: json['created_at'] != null ? _timeAgo(json['created_at']) : '방금 전',
+      replies: (json['replies'] as List<dynamic>?)
+              ?.map((e) => GroupReply.fromJson(e))
+              .toList() ??
+          [],
+    );
+  }
+
+  static String _timeAgo(String dateTimeStr) {
+    try {
+      final dateTime = DateTime.parse(dateTimeStr).toLocal();
+      final difference = DateTime.now().difference(dateTime);
+      if (difference.inDays > 0) return '${difference.inDays}일 전';
+      if (difference.inHours > 0) return '${difference.inHours}시간 전';
+      if (difference.inMinutes > 0) return '${difference.inMinutes}분 전';
+      return '방금 전';
+    } catch (e) {
+      return dateTimeStr;
+    }
+  }
 }
 // 2. 자식 대댓글 (GroupReply) - 새로 추가
 // ------------------------------------------------------------------
 class GroupReply {
+  int id;
   String author;
   String content;
   int likeCount;     // 답글에도 좋아요 가능!
@@ -34,6 +65,7 @@ class GroupReply {
   String timeAgo;
 
   GroupReply({
+    this.id = 0,
     required this.author,
     required this.content,
     this.likeCount = 0,
@@ -41,9 +73,22 @@ class GroupReply {
     this.isMine = false,
     this.timeAgo = '방금 전',
   });
+
+  factory GroupReply.fromJson(Map<String, dynamic> json) {
+    return GroupReply(
+      id: json['id'] ?? 0,
+      author: json['author'] ?? '',
+      content: json['content'] ?? '',
+      likeCount: json['likes_count'] ?? 0,
+      isLiked: json['is_liked'] ?? false,
+      timeAgo: json['created_at'] != null ? GroupComment._timeAgo(json['created_at']) : '방금 전',
+    );
+  }
 }
 
 class GroupPost {
+  int id;
+  String title;
   String author;
   String content; // 수정 가능하도록 final 제거
   final String timeAgo;
@@ -51,11 +96,14 @@ class GroupPost {
   final bool isPrivate;
   String? imageUrl; // 수정 가능하도록 final 제거
   final String? videoUrl;
+  String? attachmentUrl;
   int likeCount;
   bool isLiked;
   List<GroupComment> comments;
 
   GroupPost({
+    this.id = 0,
+    this.title = '',
     required this.author,
     required this.content,
     required this.timeAgo,
@@ -63,10 +111,45 @@ class GroupPost {
     this.isPrivate = false,
     this.imageUrl,
     this.videoUrl,
+    this.attachmentUrl,
     this.likeCount = 0,
     this.isLiked = false,
-    List<GroupComment>? comments,
-  }) : comments = comments ?? [];
+    this.comments = const [],
+  });
+
+  factory GroupPost.fromJson(Map<String, dynamic> json) {
+    return GroupPost(
+      id: json['id'] ?? 0,
+      title: json['title'] ?? '',
+      content: json['content'] ?? '',
+      author: json['author'] ?? '',
+      likeCount: json['likes_count'] ?? 0,
+      isLiked: json['is_liked'] ?? false,
+      attachmentUrl: json['attachment_url'],
+      imageUrl: json['attachment_url'], // 만약 이미지가 있다면 이미지 URL로도 사용
+      timeAgo: json['created_at'] != null ? _timeAgo(json['created_at']) : '방금 전',
+      comments: (json['comments'] as List<dynamic>?)
+              ?.map((e) => GroupComment.fromJson(e))
+              .toList() ??
+          [],
+      isNotice: false,
+      isPrivate: false,
+      videoUrl: null,
+    );
+  }
+
+  static String _timeAgo(String dateTimeStr) {
+    try {
+      final dateTime = DateTime.parse(dateTimeStr).toLocal();
+      final difference = DateTime.now().difference(dateTime);
+      if (difference.inDays > 0) return '${difference.inDays}일 전';
+      if (difference.inHours > 0) return '${difference.inHours}시간 전';
+      if (difference.inMinutes > 0) return '${difference.inMinutes}분 전';
+      return '방금 전';
+    } catch (e) {
+      return dateTimeStr;
+    }
+  }
 }
 
 class GroupMember {

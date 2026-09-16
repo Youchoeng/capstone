@@ -354,8 +354,10 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
     // 채팅방을 여는 순간 읽음 처리
     _markChatAsReadByName(chat.name);
     await LocalChatDb.instance.markRead(chat.groupId, chat.peerId);
+    if (!bottomSheetContext.mounted) return;
     Navigator.pop(bottomSheetContext); // 바텀시트 닫기
 
+    if (!context.mounted) return;
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -378,6 +380,7 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
                 item.groupId == chat.groupId && item.peerId == chat.peerId,
           );
         });
+        if (!context.mounted) return;
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('쪽지방에서 나갔습니다.')));
@@ -864,6 +867,7 @@ class _GroupMainScreenState extends State<GroupMainScreen> {
               );
             });
 
+            if (!context.mounted) return;
             ScaffoldMessenger.of(
               context,
             ).showSnackBar(const SnackBar(content: Text('새 모임이 생성되었습니다!')));

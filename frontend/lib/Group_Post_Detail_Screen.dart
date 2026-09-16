@@ -1,6 +1,7 @@
 // 모임 내부 화면에서 글 직접 들어가기(수다 탭 댓글 기능, 좋아요 기능 등 차용)
 import 'package:flutter/material.dart';
 import 'Group_Model.dart';
+import 'api_service.dart';
 
 class GroupPostDetailScreen extends StatefulWidget {
   final GroupPost post;
@@ -44,9 +45,27 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
     List<TextSpan> spans = [];
     content.split(' ').forEach((word) {
       if (word.startsWith('@')) {
-        spans.add(TextSpan(text: '$word ', style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 18)));
+        spans.add(
+          TextSpan(
+            text: '$word ',
+            style: const TextStyle(
+              color: Colors.blue,
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
+            ),
+          ),
+        );
       } else {
-        spans.add(TextSpan(text: '$word ', style: const TextStyle(color: Colors.black, fontSize: 18, height: 1.5)));
+        spans.add(
+          TextSpan(
+            text: '$word ',
+            style: const TextStyle(
+              color: Colors.black,
+              fontSize: 18,
+              height: 1.5,
+            ),
+          ),
+        );
       }
     });
     return RichText(text: TextSpan(children: spans));
@@ -62,7 +81,10 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
         title: const Text('삭제', style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text('정말 삭제하시겠습니까?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소'),
+          ),
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
@@ -95,14 +117,69 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
           });
         } else if (value == 'delete') {
           _confirmDelete(onDelete);
+        } else if (value == 'report') {
+          _showReportDialog(isPost: item is GroupPost, targetId: item.id);
         }
       },
       itemBuilder: (context) => [
         // 남의 글을 지우는 방장일 경우 수정 불가, 삭제만 가능하도록 예외 처리 가능
         if (item.author == widget.userName)
           const PopupMenuItem(value: 'edit', child: Text('수정')),
-        const PopupMenuItem(value: 'delete', child: Text('삭제', style: TextStyle(color: Colors.red))),
+        if (item.author == widget.userName || widget.isLeader)
+          const PopupMenuItem(
+            value: 'delete',
+            child: Text('삭제', style: TextStyle(color: Colors.red)),
+          ),
+        const PopupMenuItem(
+          value: 'report',
+          child: Text('신고하기', style: TextStyle(color: Colors.orange)),
+        ),
       ],
+    );
+  }
+
+  void _showReportDialog({required bool isPost, required int targetId}) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        final reasons = ['스팸 및 홍보', '욕설 및 비하', '음란물 및 부적절한 콘텐츠', '도배', '기타'];
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  '신고 사유 선택',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              ...reasons.map(
+                (reason) => ListTile(
+                  title: Text(reason),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final errorMsg = isPost
+                        ? await ApiService.reportPost(targetId, reason)
+                        : await ApiService.reportComment(
+                            widget.post.id,
+                            targetId,
+                            reason,
+                          );
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(errorMsg ?? '신고가 접수되었습니다.')),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -111,7 +188,12 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
   // ------------------------------------------------------------------
   Widget _buildReply(GroupComment parentComment, GroupReply reply) {
     return Padding(
-      padding: const EdgeInsets.only(left: 40.0, top: 8.0, bottom: 8.0, right: 16.0),
+      padding: const EdgeInsets.only(
+        left: 40.0,
+        top: 8.0,
+        bottom: 8.0,
+        right: 16.0,
+      ),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -126,14 +208,27 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.subdirectory_arrow_right, color: Colors.grey, size: 16),
+                    const Icon(
+                      Icons.subdirectory_arrow_right,
+                      color: Colors.grey,
+                      size: 16,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       reply.author,
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: reply.author == widget.userName ? Colors.green : Colors.black87),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: reply.author == widget.userName
+                            ? Colors.green
+                            : Colors.black87,
+                      ),
                     ),
                     const SizedBox(width: 8),
-                    Text(reply.timeAgo, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    Text(
+                      reply.timeAgo,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
                   ],
                 ),
                 _buildMoreMenu(reply, () {
@@ -172,14 +267,32 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.person, color: comment.author == widget.userName ? Colors.green : Colors.grey, size: 20),
+                      Icon(
+                        Icons.person,
+                        color: comment.author == widget.userName
+                            ? Colors.green
+                            : Colors.grey,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Text(
                         comment.author,
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: comment.author == widget.userName ? Colors.green : Colors.black87),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: comment.author == widget.userName
+                              ? Colors.green
+                              : Colors.black87,
+                        ),
                       ),
                       const SizedBox(width: 8),
-                      Text(comment.timeAgo, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      Text(
+                        comment.timeAgo,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
                     ],
                   ),
                   _buildMoreMenu(comment, () {
@@ -193,7 +306,10 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
               const SizedBox(height: 4),
               Padding(
                 padding: const EdgeInsets.only(left: 28.0),
-                child: Text(comment.content, style: const TextStyle(fontSize: 16)),
+                child: Text(
+                  comment.content,
+                  style: const TextStyle(fontSize: 16),
+                ),
               ),
               const SizedBox(height: 8),
 
@@ -209,7 +325,14 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
                       _focusNode.requestFocus(); // 키보드 띄우기
                     });
                   },
-                  child: const Text('답글 달기', style: TextStyle(color: Colors.grey, fontSize: 13, fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    '답글 달기',
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -239,17 +362,15 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
         _editTarget = null;
       } else if (_replyTarget != null) {
         // 2. 대댓글 작성 모드
-        _replyTarget!.replies.add(GroupReply(
-          author: widget.userName,
-          content: text,
-        ));
+        _replyTarget!.replies.add(
+          GroupReply(author: widget.userName, content: text),
+        );
         _replyTarget = null;
       } else {
         // 3. 일반 새 댓글 작성 모드
-        widget.post.comments.add(GroupComment(
-          author: widget.userName,
-          content: text,
-        ));
+        widget.post.comments.add(
+          GroupComment(author: widget.userName, content: text),
+        );
       }
 
       _commentController.clear();
@@ -274,9 +395,15 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
         bottomNavigationBar: SafeArea(
           child: Container(
             padding: EdgeInsets.only(
-              left: 16, right: 16, top: 10, bottom: MediaQuery.of(context).viewInsets.bottom + 10,
+              left: 16,
+              right: 16,
+              top: 10,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 10,
             ),
-            decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade300))),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Colors.grey.shade300)),
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -285,7 +412,10 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
                 if (_replyTarget != null || _editTarget != null)
                   Container(
                     margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.grey[200],
                       borderRadius: BorderRadius.circular(8),
@@ -297,7 +427,10 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
                           _editTarget != null
                               ? '댓글 수정 중...'
                               : '${_replyTarget!.author} 님에게 답글 작성 중',
-                          style: const TextStyle(fontSize: 13, color: Colors.black87),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.black87,
+                          ),
                         ),
                         GestureDetector(
                           onTap: () {
@@ -308,7 +441,11 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
                               FocusScope.of(context).unfocus();
                             });
                           },
-                          child: const Icon(Icons.close, size: 16, color: Colors.grey),
+                          child: const Icon(
+                            Icons.close,
+                            size: 16,
+                            color: Colors.grey,
+                          ),
                         ),
                       ],
                     ),
@@ -322,15 +459,26 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
                         controller: _commentController,
                         focusNode: _focusNode,
                         decoration: InputDecoration(
-                          hintText: _replyTarget != null ? '답글을 남겨보세요' : '댓글을 남겨보세요',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(20)),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          hintText: _replyTarget != null
+                              ? '답글을 남겨보세요'
+                              : '댓글을 남겨보세요',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
                         ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     IconButton(
-                      icon: const Icon(Icons.send, color: Colors.green, size: 28),
+                      icon: const Icon(
+                        Icons.send,
+                        color: Colors.green,
+                        size: 28,
+                      ),
                       onPressed: _handleSubmit,
                     ),
                   ],
@@ -353,53 +501,126 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
                   children: [
                     Row(
                       children: [
-                        CircleAvatar(backgroundColor: Colors.grey[300], child: const Icon(Icons.person, color: Colors.white)),
+                        CircleAvatar(
+                          backgroundColor: Colors.grey[300],
+                          child: const Icon(Icons.person, color: Colors.white),
+                        ),
                         const SizedBox(width: 12),
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(widget.post.author, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                            Text(widget.post.timeAgo, style: const TextStyle(color: Colors.grey)),
+                            Text(
+                              widget.post.author,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              widget.post.timeAgo,
+                              style: const TextStyle(color: Colors.grey),
+                            ),
                           ],
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 12),
+                    if (widget.post.title.isNotEmpty) ...[
+                      Text(
+                        widget.post.title,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
 
                     // 내용 & 태그
                     _buildPostText(widget.post.content),
                     const SizedBox(height: 20),
 
                     // 사진 원본 크기로 보여주기
-                    if (widget.post.imageUrl != null)
+                    if (widget.post.imageUrl != null &&
+                        widget.post.imageUrl!.isNotEmpty)
                       ClipRRect(
                         borderRadius: BorderRadius.circular(12),
-                        child: Image.network(widget.post.imageUrl!, width: double.infinity, fit: BoxFit.contain),
+                        child: Image.network(
+                          ApiService.getImageUrl(widget.post.imageUrl) ??
+                              widget.post.imageUrl!,
+                          width: double.infinity,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const SizedBox.shrink(),
+                        ),
                       ),
 
                     const SizedBox(height: 20),
                     // 좋아요 버튼
                     OutlinedButton.icon(
-                      onPressed: () {
+                      onPressed: () async {
+                        final previousLike = widget.post.isLiked;
                         setState(() {
                           widget.post.isLiked = !widget.post.isLiked;
-                          widget.post.isLiked ? widget.post.likeCount++ : widget.post.likeCount--;
+                          widget.post.isLiked
+                              ? widget.post.likeCount++
+                              : widget.post.likeCount--;
                         });
+
+                        final newCount = !previousLike
+                            ? await ApiService.likePost(widget.post.id)
+                            : await ApiService.unlikePost(widget.post.id);
+
+                        if (newCount == null) {
+                          if (context.mounted) {
+                            setState(() {
+                              widget.post.isLiked = previousLike;
+                              widget.post.isLiked
+                                  ? widget.post.likeCount++
+                                  : widget.post.likeCount--;
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('요청 실패')),
+                            );
+                          }
+                        } else {
+                          if (context.mounted) {
+                            setState(() => widget.post.likeCount = newCount);
+                          }
+                        }
                         widget.onUpdate();
                       },
-                      icon: Icon(widget.post.isLiked ? Icons.favorite : Icons.favorite_border, color: Colors.red),
-                      label: Text('공감 ${widget.post.likeCount}', style: const TextStyle(color: Colors.red, fontSize: 16)),
-                      style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
+                      icon: Icon(
+                        widget.post.isLiked
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        color: Colors.red,
+                      ),
+                      label: Text(
+                        '공감 ${widget.post.likeCount}',
+                        style: const TextStyle(color: Colors.red, fontSize: 16),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.red),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
               Container(height: 8, color: Colors.grey[200]), // 구분선
-
               // 2. 댓글 헤더
               Padding(
                 padding: const EdgeInsets.all(16.0),
-                child: Text('댓글 ${widget.post.comments.length}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                child: Text(
+                  '댓글 ${widget.post.comments.length}',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
 
               // 3. 댓글 목록

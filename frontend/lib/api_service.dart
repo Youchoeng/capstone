@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart'; //토큰 추가 코드
+import 'Group_Model.dart';
 
 class ApiService {
   // 웹(Chrome): localhost:8000
@@ -47,22 +49,22 @@ class ApiService {
         final meData = await getMe();
 
         if (meData != null) {
-          print("👤 [로그] getMe() 호출 성공! 회원 정보: $meData");
+          debugPrint("👤 [로그] getMe() 호출 성공! 회원 정보: $meData");
 
           // 백엔드 DB의 고유 고유번호(보통 'id')를 추출합니다.
           final backendId = meData['id'] ?? meData['internal_id'];
 
           if (backendId != null) {
             currentUserId = backendId.toString(); // ⭕ 숫자 고유번호(예: "6")가 정상 저장됨!
-            print(
+            debugPrint(
               "🎯 [성공] currentUserId가 숫자형 ID인 '$currentUserId'로 매pping 되었습니다.",
             );
           } else {
-            print("⚠️ [경고] getMe() 응답에 'id' 키가 없습니다. 전체 데이터를 확인하세요.");
+            debugPrint("⚠️ [경고] getMe() 응답에 'id' 키가 없습니다. 전체 데이터를 확인하세요.");
             currentUserId = userId; // 대체재로 기존 문자열 아이디 유지
           }
         } else {
-          print("❌ [에러] 로그인 후 getMe()로 유저 정보를 가져오는데 실패했습니다.");
+          debugPrint("❌ [에러] 로그인 후 getMe()로 유저 정보를 가져오는데 실패했습니다.");
           currentUserId = userId;
         }
 
@@ -91,9 +93,27 @@ class ApiService {
       token = null;
       currentUserId = null;
 
-      print("🧹 [ApiService] 로컬 SharedPreferences 세션 초기화가 완료되었습니다.");
+      debugPrint("🧹 [ApiService] 로컬 SharedPreferences 세션 초기화가 완료되었습니다.");
     } catch (e) {
-      print("⚠️ [ApiService] 로컬 세션 파괴 중 오류 발생: $e");
+      debugPrint("⚠️ [ApiService] 로컬 세션 파괴 중 오류 발생: $e");
+    }
+  }
+
+  // 회원 탈퇴 ──────────────────────────────────────────────────────
+  static Future<String?> deleteAccount() async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/users/me'),
+        headers: await getHeaders(),
+      );
+      if (response.statusCode == 200) {
+        await logout(); // 로컬 토큰 및 캐시 삭제
+        return null; // 성공
+      }
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return data['detail'] ?? '탈퇴 실패';
+    } catch (e) {
+      return '서버 연결 실패: $e';
     }
   }
 
@@ -194,6 +214,46 @@ class ApiService {
     } catch (e) {
       return null;
     }
+  }
+
+  // ── 이미지 업로드 ────────────────────────────────────────────────
+  static Future<String?> uploadPostImage(File imageFile) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$baseUrl/posts/upload'),
+      );
+
+      final headers = await getHeaders();
+      request.headers.addAll(headers);
+
+      request.files.add(
+        await http.MultipartFile.fromPath('file', imageFile.path),
+      );
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['file_url'];
+      }
+      return null;
+    } catch (e) {
+      debugPrint('이미지 업로드 실패: $e');
+      return null;
+    }
+  }
+
+  // ── 이미지 경로 절대 URL 변환 ──────────────────────────────────────
+  static String? getImageUrl(String? path) {
+    if (path == null || path.isEmpty) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+    // 상대 경로인 경우 baseUrl과 결합
+    final formattedPath = path.startsWith('/') ? path : '/$path';
+    return '$baseUrl$formattedPath';
   }
 
   // ── 게시글 작성 ──────────────────────────────────────────────────
@@ -411,6 +471,42 @@ class ApiService {
     }
   }
 
+  // ── 게시글 신고 ──────────────────────────────────────────────────
+  static Future<String?> reportPost(int postId, String reason) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/posts/$postId/report'),
+        headers: await getHeaders(),
+        body: jsonEncode({'reason': reason}),
+      );
+      if (response.statusCode == 201) return null; // Success
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return data['detail'] ?? '신고에 실패했습니다.';
+    } catch (e) {
+      return '서버 연결 실패: $e';
+    }
+  }
+
+  // ── 댓글/대댓글 신고 ──────────────────────────────────────────────
+  static Future<String?> reportComment(
+    int postId,
+    int commentId,
+    String reason,
+  ) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/posts/$postId/comments/$commentId/report'),
+        headers: await getHeaders(),
+        body: jsonEncode({'reason': reason}),
+      );
+      if (response.statusCode == 201) return null; // Success
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return data['detail'] ?? '신고에 실패했습니다.';
+    } catch (e) {
+      return '서버 연결 실패: $e';
+    }
+  }
+
   // ══════════════════════════════════════════════════════════════
   // 모임(Group) API
   // ══════════════════════════════════════════════════════════════
@@ -435,15 +531,15 @@ class ApiService {
   static Future<List<dynamic>?> getMyGroups() async {
     try {
       final headers = await getHeaders();
-      print('1️⃣ [요청 헤더]: $headers'); // 토큰이 제대로 담겨서 가는지 확인
+      debugPrint('1️⃣ [요청 헤더]: $headers'); // 토큰이 제대로 담겨서 가는지 확인
 
       final response = await http.get(
         Uri.parse('$baseUrl/groups/my'),
         headers: headers,
       );
 
-      print('2️⃣ [응답 상태코드]: ${response.statusCode}'); // 200인지, 401인지 확인
-      print(
+      debugPrint('2️⃣ [응답 상태코드]: ${response.statusCode}'); // 200인지, 401인지 확인
+      debugPrint(
         '3️⃣ [응답 데이터]: ${utf8.decode(response.bodyBytes)}',
       ); // 서버가 진짜로 뭘 주는지 확인
 
@@ -452,7 +548,7 @@ class ApiService {
       }
       return null;
     } catch (e) {
-      print('❌ [요청 에러]: $e');
+      debugPrint('❌ [요청 에러]: $e');
       return null;
     }
   }
@@ -608,13 +704,14 @@ class ApiService {
   }
 
   // ── 모임 게시글 목록 ─────────────────────────────────────────
-  static Future<List<dynamic>?> getGroupPosts(int groupId) async {
+  static Future<List<GroupPost>?> getGroupPosts(int groupId) async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/groups/$groupId/posts'),
       );
       if (response.statusCode == 200) {
-        return jsonDecode(utf8.decode(response.bodyBytes));
+        final List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
+        return data.map((e) => GroupPost.fromJson(e)).toList();
       }
       return null;
     } catch (e) {
@@ -628,16 +725,20 @@ class ApiService {
     required String title,
     required String content,
     bool isAnonymous = false,
+    String? attachmentUrl,
   }) async {
     try {
+      final body = <String, dynamic>{
+        'title': title,
+        'content': content,
+        'is_anonymous': isAnonymous,
+      };
+      if (attachmentUrl != null) body['attachment_url'] = attachmentUrl;
+
       final response = await http.post(
         Uri.parse('$baseUrl/groups/$groupId/posts'),
         headers: await getHeaders(),
-        body: jsonEncode({
-          'title': title,
-          'content': content,
-          'is_anonymous': isAnonymous,
-        }),
+        body: jsonEncode(body),
       );
       if (response.statusCode == 201) {
         return jsonDecode(response.body)['post_id'];
@@ -686,11 +787,11 @@ class ApiService {
         // 한글 깨짐 방지를 위해 인코딩 처리 후 JSON 파싱
         return jsonDecode(utf8.decode(response.bodyBytes)) as List<dynamic>;
       } else {
-        print("getChatHistory 서버 에러 코드: ${response.statusCode}");
+        debugPrint("getChatHistory 서버 에러 코드: ${response.statusCode}");
         return [];
       }
     } catch (e) {
-      print("getChatHistory 네트워크 에러 발생: $e");
+      debugPrint("getChatHistory 네트워크 에러 발생: $e");
       return [];
     }
   }
@@ -718,10 +819,10 @@ class ApiService {
           return data['url'] as String?;
         }
       }
-      print("이미지 업로드 실패: ${response.statusCode}");
+      debugPrint("이미지 업로드 실패: ${response.statusCode}");
       return null;
     } catch (e) {
-      print("이미지 업로드 중 네트워크 에러: $e");
+      debugPrint("이미지 업로드 중 네트워크 에러: $e");
       return null;
     }
   }
@@ -732,10 +833,7 @@ class ApiService {
       final response = await http.post(
         Uri.parse('$baseUrl/chat/fcm-token'),
         headers: await getHeaders(),
-        body: jsonEncode({
-          'user_id': userId,
-          'fcm_token': fcmToken,
-        }),
+        body: jsonEncode({'user_id': userId, 'fcm_token': fcmToken}),
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -743,7 +841,7 @@ class ApiService {
       }
       return false;
     } catch (e) {
-      print("FCM 토큰 등록 네트워크 에러: $e");
+      debugPrint("FCM 토큰 등록 네트워크 에러: $e");
       return false;
     }
   }
