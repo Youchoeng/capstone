@@ -599,6 +599,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
           title: newPost.title,
           content: newPost.content,
           isAnonymous: false,
+          isNotice: newPost.isNotice,
           attachmentUrl: uploadedUrl,
         );
 

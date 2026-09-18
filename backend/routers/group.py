@@ -21,7 +21,7 @@ from crud.group import (
     get_my_groups, get_group_detail, is_member, is_leader,
     create_join_request, get_pending_join_requests,
     approve_join_request, reject_join_request,
-    leave_group, delete_group, kick_member,
+    leave_group, delete_group, kick_member, transfer_leader,
 )
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -201,6 +201,21 @@ def api_kick_member(
         )
     return {"message": "멤버 강퇴 완료"}
 
+# ── 방장 권한 위임 (리더 전용) ──────────────────────────────────
+@router.patch("/{group_id}/transfer-leader")
+def api_transfer_leader(
+    group_id: int,
+    target_user_id: int = Query(..., description="위임받을 멤버의 user_id"),
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    ok = transfer_leader(session, group_id, current_user.internal_id, target_user_id)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="권한 위임 실패. (모임장이 아니거나 유효하지 않은 대상입니다)",
+        )
+    return {"message": "방장 권한 위임 완료"}
 
 # ════════════════════════════════════════════════════════════════
 # 모임 내부 게시판 (수다탭과 동일한 구조, group_id로 필터)
@@ -217,10 +232,14 @@ def create_group_post(
     if not is_member(session, group_id, current_user.internal_id):
         raise HTTPException(status_code=403, detail="모임 멤버만 글을 작성할 수 있습니다.")
 
+    if data.is_notice and not is_leader(session, group_id, current_user.internal_id):
+        raise HTTPException(status_code=403, detail="모임장만 공지사항을 등록할 수 있습니다.")
+
     post = Post(
         title=data.title,
         content=data.content,
         is_anonymous=data.is_anonymous,
+        is_notice=data.is_notice,
         attachment_url=data.attachment_url,
         author_internal_id=current_user.internal_id,
         group_id=group_id,
@@ -239,7 +258,9 @@ def get_group_posts(
     current_user: User | None = Depends(get_current_user_optional)
 ):
     posts = session.exec(
-        select(Post).where(Post.group_id == group_id)
+        select(Post)
+        .where(Post.group_id == group_id)
+        .order_by(Post.is_notice.desc(), Post.created_at.desc())
     ).all()
 
     liked_post_ids = set()
@@ -263,6 +284,7 @@ def get_group_posts(
             author="익명" if post.is_anonymous else (author.nickname if author else "알 수 없음"),
             likes_count=post.likes_count,
             is_liked=post.id in liked_post_ids,
+            is_notice=post.is_notice,
             created_at=post.created_at,
             attachment_url=post.attachment_url,
         ))

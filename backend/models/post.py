@@ -18,6 +18,8 @@ class Post(SQLModel, table=True):
 
     # 익명 여부
     is_anonymous: bool = Field(default=False)
+    # 공지사항 여부
+    is_notice: bool = Field(default=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     # 밑의 PostLike와 겹치지만 성능을 위해 넣음 / PostLike와 함께 처리해야 함
     likes_count: int = Field(default=0)

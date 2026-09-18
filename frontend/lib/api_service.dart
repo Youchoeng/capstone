@@ -703,6 +703,19 @@ class ApiService {
     }
   }
 
+  // ── 방장 권한 위임 ─────────────────────────────────────────────
+  static Future<bool> transferGroupLeader(int groupId, int newLeaderId) async {
+    try {
+      final response = await http.patch(
+        Uri.parse('$baseUrl/groups/$groupId/transfer-leader?target_user_id=$newLeaderId'),
+        headers: await getHeaders(),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // ── 모임 게시글 목록 ─────────────────────────────────────────
   static Future<List<GroupPost>?> getGroupPosts(int groupId) async {
     try {
@@ -725,6 +738,7 @@ class ApiService {
     required String title,
     required String content,
     bool isAnonymous = false,
+    bool isNotice = false,
     String? attachmentUrl,
   }) async {
     try {
@@ -732,6 +746,7 @@ class ApiService {
         'title': title,
         'content': content,
         'is_anonymous': isAnonymous,
+        'is_notice': isNotice,
       };
       if (attachmentUrl != null) body['attachment_url'] = attachmentUrl;
 

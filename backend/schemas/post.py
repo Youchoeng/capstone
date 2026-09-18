@@ -10,6 +10,7 @@ class PostCreate(BaseModel):
     title: str = Field(max_length=100)
     content: str
     is_anonymous: bool = False
+    is_notice: bool = False
     attachment_url: Optional[str] = None
 
     @field_validator("title", "content")
@@ -25,6 +26,7 @@ class PostUpdate(BaseModel):
     """게시글 수정 시 받는 데이터 (부분 수정 가능)"""
     title: Optional[str] = Field(default=None, max_length=100)
     content: Optional[str] = None
+    is_notice: Optional[bool] = None
 
     @field_validator("title", "content")
     @classmethod
@@ -82,6 +84,7 @@ class PostResponse(BaseModel):
     author: str
     likes_count: int
     is_liked: bool = False
+    is_notice: bool = False
     created_at: datetime
     attachment_url: Optional[str] = None
 
@@ -93,6 +96,7 @@ class PostDetailResponse(BaseModel):
     author: str
     likes_count: int
     is_liked: bool = False
+    is_notice: bool = False
     attachment_url: Optional[str] = None
     created_at: datetime
     comments: list[CommentResponse] = []

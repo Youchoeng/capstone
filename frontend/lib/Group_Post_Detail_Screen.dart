@@ -101,10 +101,6 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
   // 🌟 메뉴 버튼 (수정/삭제)
   // ------------------------------------------------------------------
   Widget _buildMoreMenu(dynamic item, VoidCallback onDelete) {
-    // 내 글이거나 방장일 때만 메뉴 보임
-    bool hasPermission = item.author == widget.userName || widget.isLeader;
-    if (!hasPermission) return const SizedBox.shrink();
-
     return PopupMenuButton<String>(
       icon: const Icon(Icons.more_vert, color: Colors.grey, size: 20),
       onSelected: (value) {
@@ -122,10 +118,9 @@ class _GroupPostDetailScreenState extends State<GroupPostDetailScreen> {
         }
       },
       itemBuilder: (context) => [
-        // 남의 글을 지우는 방장일 경우 수정 불가, 삭제만 가능하도록 예외 처리 가능
         if (item.author == widget.userName)
           const PopupMenuItem(value: 'edit', child: Text('수정')),
-        if (item.author == widget.userName || widget.isLeader)
+        if (item.author == widget.userName)
           const PopupMenuItem(
             value: 'delete',
             child: Text('삭제', style: TextStyle(color: Colors.red)),

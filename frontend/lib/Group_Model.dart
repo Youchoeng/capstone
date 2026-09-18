@@ -132,7 +132,7 @@ class GroupPost {
               ?.map((e) => GroupComment.fromJson(e))
               .toList() ??
           [],
-      isNotice: false,
+      isNotice: json['is_notice'] ?? false,
       isPrivate: false,
       videoUrl: null,
     );

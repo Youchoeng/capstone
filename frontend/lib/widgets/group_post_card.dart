@@ -48,7 +48,25 @@ class GroupPostCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(post.author, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        Row(
+                          children: [
+                            if (post.isNotice)
+                              Container(
+                                margin: const EdgeInsets.only(right: 6),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.red[50],
+                                  border: Border.all(color: Colors.red),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  '공지',
+                                  style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            Text(post.author, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
                         Text(post.timeAgo, style: const TextStyle(color: Colors.grey)),
                       ],
                     ),

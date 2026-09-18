@@ -241,7 +241,7 @@ def leave_group(session: Session, group_id: int, user_id: int) -> bool:
 
 
 def delete_group(session: Session, group_id: int, user_id: int) -> bool:
-    """모임 삭제 (리더만 가능)."""
+    """모임 삭제 (리더만 가능). 연관된 게시글, 댓글, 가입요청 등 모두 삭제."""
     if not is_leader(session, group_id, user_id):
         return False
 
@@ -249,12 +249,56 @@ def delete_group(session: Session, group_id: int, user_id: int) -> bool:
     if group is None:
         return False
 
-    # 멤버, 가입요청 모두 삭제
+    # 1. 모임 내 게시글 가져오기
+    from models.post import Post, Comment, PostLike, CommentLike
+    from sqlmodel import delete
+    posts = session.exec(select(Post).where(Post.group_id == group_id)).all()
+    
+    for p in posts:
+        # 게시글에 달린 댓글들 가져오기
+        comments = session.exec(select(Comment).where(Comment.post_id == p.id)).all()
+        for c in comments:
+            # 댓글 좋아요 삭제
+            session.exec(delete(CommentLike).where(CommentLike.comment_id == c.id))
+            session.delete(c)
+        # 게시글 좋아요 삭제
+        session.exec(delete(PostLike).where(PostLike.post_id == p.id))
+        session.delete(p)
+
+    # 2. 멤버, 가입요청 삭제
     for m in group.members:
         session.delete(m)
     for r in group.join_requests:
         session.delete(r)
+        
+    # 3. 그룹 삭제
     session.delete(group)
+    session.commit()
+    return True
+
+def transfer_leader(session: Session, group_id: int, current_leader_id: int, new_leader_id: int) -> bool:
+    """모임장 권한 위임."""
+    if not is_leader(session, group_id, current_leader_id):
+        return False
+        
+    current_leader = session.exec(select(GroupMember).where(
+        GroupMember.group_id == group_id,
+        GroupMember.user_id == current_leader_id,
+    )).first()
+    
+    new_leader = session.exec(select(GroupMember).where(
+        GroupMember.group_id == group_id,
+        GroupMember.user_id == new_leader_id,
+    )).first()
+    
+    if not current_leader or not new_leader:
+        return False
+        
+    current_leader.is_leader = False
+    new_leader.is_leader = True
+    
+    session.add(current_leader)
+    session.add(new_leader)
     session.commit()
     return True
 
